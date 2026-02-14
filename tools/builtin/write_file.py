@@ -91,15 +91,19 @@ class WriteFileTool(Tool):
 
             action = "Created" if is_new_file else "Updated"
             line_count = len(params.content.splitlines())
+            diff = FileDiff(
+                path=path,
+                old_content=old_content,
+                new_content=params.content,
+                is_new_file=is_new_file,
+            )
+
+            if invocation.undo_manager:
+                invocation.undo_manager.record_change(diff)
 
             return ToolResult.success_result(
                 f"{action} {path} {line_count} lines",
-                diff=FileDiff(
-                    path=path,
-                    old_content=old_content,
-                    new_content=params.content,
-                    is_new_file=is_new_file,
-                ),
+                diff=diff,
                 metadata={
                     "path": str(path),
                     "is_new_file": is_new_file,

@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from config.config import Config
 from hooks.hook_system import HookSystem
 from safety.approval import ApprovalContext, ApprovalDecision, ApprovalManager
@@ -7,6 +7,9 @@ from tools.base import Tool, ToolInvocation, ToolResult
 import logging
 from tools.builtin import ReadFileTool, get_all_builtin_tools
 from tools.subagents import SubagentTool, get_default_subagent_definitions
+
+if TYPE_CHECKING:
+    from agent.undo import UndoManager
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +75,7 @@ class ToolRegistry:
         cwd: Path,
         hook_system: HookSystem,
         approval_manager: ApprovalManager | None = None,
+        undo_manager: "UndoManager | None" = None,
     ) -> ToolResult:
         tool = self.get(name)
         if tool is None:
@@ -100,6 +104,7 @@ class ToolRegistry:
         invocation = ToolInvocation(
             params=params,
             cwd=cwd,
+            undo_manager=undo_manager,
         )
         if approval_manager:
             confirmation = await tool.get_confirmation(invocation)

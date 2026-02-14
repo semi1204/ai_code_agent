@@ -101,15 +101,19 @@ class EditTool(Tool):
             path.write_text(params.new_string, encoding="utf-8")
 
             line_count = len(params.new_string.splitlines())
+            diff = FileDiff(
+                path=path,
+                old_content="",
+                new_content=params.new_string,
+                is_new_file=True,
+            )
+
+            if invocation.undo_manager:
+                invocation.undo_manager.record_change(diff)
 
             return ToolResult.success_result(
                 f"Created {path} {line_count} lines",
-                diff=FileDiff(
-                    path=path,
-                    old_content="",
-                    new_content=params.new_string,
-                    is_new_file=True,
-                ),
+                diff=diff,
                 metadata={
                     "path": str(path),
                     "is_new_file": True,
@@ -168,9 +172,14 @@ class EditTool(Tool):
         elif line_diff < 0:
             diff_msg = f" ({line_diff} lines)"
 
+        diff = FileDiff(path=path, old_content=old_content, new_content=new_content)
+
+        if invocation.undo_manager:
+            invocation.undo_manager.record_change(diff)
+
         return ToolResult.success_result(
             f"Edited {path}: replaced {replace_count} occurrence(s){diff_msg}",
-            diff=FileDiff(path=path, old_content=old_content, new_content=new_content),
+            diff=diff,
             metadata={
                 "path": str(path),
                 "replaced_count": replace_count,

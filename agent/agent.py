@@ -1,11 +1,13 @@
 from __future__ import annotations
+import asyncio
 from typing import AsyncGenerator, Awaitable, Callable
 from agent.events import AgentEvent, AgentEventType
 from agent.session import Session
 from client.response import StreamEventType, TokenUsage, ToolCall, ToolResultMessage
 from config.config import Config
 from prompts.system import create_loop_breaker_prompt
-from tools.base import ToolConfirmation
+from tools.base import ToolConfirmation, ToolResult
+from tools.parallel import DependencyAnalyzer
 
 
 class Agent:
@@ -17,6 +19,7 @@ class Agent:
         self.config = config
         self.session: Session | None = Session(self.config)
         self.session.approval_manager.confirmation_callback = confirmation_callback
+        self._dependency_analyzer = DependencyAnalyzer()
 
     async def run(self, message: str):
         await self.session.hook_system.trigger_before_agent(message)
@@ -111,45 +114,104 @@ class Agent:
 
             tool_call_results: list[ToolResultMessage] = []
 
-            for tool_call in tool_calls:
-                yield AgentEvent.tool_call_start(
-                    tool_call.call_id,
-                    tool_call.name,
-                    tool_call.arguments,
+            if self.config.parallel_tools and len(tool_calls) > 1:
+                prepared_calls = [
+                    (tc.name, tc.call_id, tc.arguments) for tc in tool_calls
+                ]
+                batches = self._dependency_analyzer.group_parallel_calls(
+                    prepared_calls, self.config.cwd
                 )
 
-                self.session.loop_detector.record_action(
-                    "tool_call",
-                    tool_name=tool_call.name,
-                    args=tool_call.arguments,
-                )
+                for batch in batches:
+                    for name, call_id, args in batch:
+                        yield AgentEvent.tool_call_start(call_id, name, args)
+                        self.session.loop_detector.record_action(
+                            "tool_call", tool_name=name, args=args
+                        )
 
-                result = await self.session.tool_registry.invoke(
-                    tool_call.name,
-                    tool_call.arguments,
-                    self.config.cwd,
-                    self.session.hook_system,
-                    self.session.approval_manager,
-                )
+                    async def invoke_tool(
+                        name: str, call_id: str, args: dict
+                    ) -> tuple[str, str, ToolResult]:
+                        result = await self.session.tool_registry.invoke(
+                            name,
+                            args,
+                            self.config.cwd,
+                            self.session.hook_system,
+                            self.session.approval_manager,
+                            self.session.undo_manager,
+                        )
+                        return (name, call_id, result)
 
-                yield AgentEvent.tool_call_complete(
-                    tool_call.call_id,
-                    tool_call.name,
-                    result,
-                )
+                    semaphore = asyncio.Semaphore(self.config.max_parallel_tools)
 
-                tool_call_results.append(
-                    ToolResultMessage(
-                        tool_call_id=tool_call.call_id,
-                        content=result.to_model_output(),
-                        is_error=not result.success,
+                    async def invoke_with_semaphore(
+                        name: str, call_id: str, args: dict
+                    ) -> tuple[str, str, ToolResult]:
+                        async with semaphore:
+                            return await invoke_tool(name, call_id, args)
+
+                    tasks = [
+                        invoke_with_semaphore(name, call_id, args)
+                        for name, call_id, args in batch
+                    ]
+                    results = await asyncio.gather(*tasks)
+
+                    for name, call_id, result in results:
+                        yield AgentEvent.tool_call_complete(call_id, name, result)
+                        tool_call_results.append(
+                            ToolResultMessage(
+                                tool_call_id=call_id,
+                                content=result.to_model_output(),
+                                is_error=not result.success,
+                            )
+                        )
+            else:
+                for tool_call in tool_calls:
+                    yield AgentEvent.tool_call_start(
+                        tool_call.call_id,
+                        tool_call.name,
+                        tool_call.arguments,
                     )
-                )
+
+                    self.session.loop_detector.record_action(
+                        "tool_call",
+                        tool_name=tool_call.name,
+                        args=tool_call.arguments,
+                    )
+
+                    result = await self.session.tool_registry.invoke(
+                        tool_call.name,
+                        tool_call.arguments,
+                        self.config.cwd,
+                        self.session.hook_system,
+                        self.session.approval_manager,
+                        self.session.undo_manager,
+                    )
+
+                    yield AgentEvent.tool_call_complete(
+                        tool_call.call_id,
+                        tool_call.name,
+                        result,
+                    )
+
+                    tool_call_results.append(
+                        ToolResultMessage(
+                            tool_call_id=tool_call.call_id,
+                            content=result.to_model_output(),
+                            is_error=not result.success,
+                        )
+                    )
 
             for tool_result in tool_call_results:
                 self.session.context_manager.add_tool_result(
                     tool_result.tool_call_id,
                     tool_result.content,
+                )
+
+            if self.session.undo_manager.has_pending_changes():
+                tool_names = ", ".join(tc.name for tc in tool_calls)
+                self.session.undo_manager.commit_entry(
+                    f"Turn {self.session.turn_count}: {tool_names}"
                 )
 
             loop_detection_error = self.session.loop_detector.check_for_loop()

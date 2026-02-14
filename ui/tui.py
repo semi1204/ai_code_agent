@@ -610,6 +610,8 @@ class TUI:
 - `/restore <checkpoint_id>` - Restore a checkpoint
 - `/sessions` - List saved sessions
 - `/resume <session_id>` - Resume a saved session
+- `/undo [N]` - Undo last N file operations (default: 1)
+- `/history` - Show undo history
 
 ## Tips
 

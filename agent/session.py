@@ -2,6 +2,7 @@ from datetime import datetime
 import json
 from typing import Any
 import uuid
+from agent.undo import UndoManager
 from client.llm_client import LLMClient
 from config.config import Config
 from config.loader import get_data_dir
@@ -36,6 +37,7 @@ class Session:
         self.session_id = str(uuid.uuid4())
         self.created_at = datetime.now()
         self.updated_at = datetime.now()
+        self.undo_manager = UndoManager(self.session_id)
 
         self.turn_count = 0
 

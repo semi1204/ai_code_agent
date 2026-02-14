@@ -301,6 +301,36 @@ class CLI:
                     console.print(
                         f"[success]Resumed session: {session.session_id}, checkpoint: {checkpoint_id}[/success]"
                     )
+        elif cmd_name == "/undo":
+            count = 1
+            if cmd_args:
+                try:
+                    count = int(cmd_args)
+                except ValueError:
+                    console.print("[error]Usage: /undo [count][/error]")
+                    return True
+
+            undone = self.agent.session.undo_manager.undo(count)
+            if not undone:
+                console.print("[warning]Nothing to undo[/warning]")
+            else:
+                for entry in undone:
+                    console.print(f"[success]Undone: {entry.description}[/success]")
+                    for change in entry.changes:
+                        action = "Deleted" if change.is_new_file else "Restored"
+                        console.print(f"  - {action}: {change.path}")
+        elif cmd_name == "/history":
+            history = self.agent.session.undo_manager.get_history()
+            if not history:
+                console.print("[dim]No undo history[/dim]")
+            else:
+                console.print("\n[bold]Undo History[/bold]")
+                for entry in history:
+                    status = "[dim](undone)[/dim]" if entry.is_undone else ""
+                    file_count = len(entry.changes)
+                    console.print(
+                        f"  {entry.entry_id} - {entry.description} ({file_count} file(s)) {status}"
+                    )
         else:
             console.print(f"[error]Unknown command: {cmd_name}[/error]")
 

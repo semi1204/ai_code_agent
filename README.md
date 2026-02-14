@@ -1,79 +1,263 @@
-# AI Agent
+# AI Coding Agent
 
-An AI agent that can execute tasks using tools and manage conversations.
+A terminal-based AI assistant for pair programming. It can read, write, and execute code in your project.
 
-## Features
+## Getting Started
 
-### Core Functionality
+```bash
+export API_KEY=your_openrouter_key
+export BASE_URL=https://openrouter.ai/api/v1
 
-- Interactive and single-run modes
-- Streaming text responses
-- Multi-turn conversations with tool calling
-- Configurable model settings and temperature
+python main.py                    # interactive mode
+python main.py "do something"     # single prompt
+```
 
-### Built-in Tools
+## Architecture Overview
 
-- File operations: read, write, edit files
-- Directory operations: list directories, search with glob patterns
-- Text search: grep for pattern matching
-- Shell execution: run shell commands
-- Web access: search and fetch web content
-- Memory: store and retrieve information
-- Todo: manage task lists
+```
+┌──────────────────────────────────────────────────────────────┐
+│                         main.py (CLI)                        │
+│            Entry point, command handling, user I/O           │
+└──────────────────────────┬───────────────────────────────────┘
+                           │
+┌──────────────────────────▼───────────────────────────────────┐
+│                      agent/agent.py                          │
+│         Core agentic loop - orchestrates everything          │
+│    • Streams LLM responses                                   │
+│    • Dispatches tool calls (sequential or parallel)          │
+│    • Manages turn count and loop detection                   │
+└──────────────────────────┬───────────────────────────────────┘
+                           │
+┌──────────────────────────▼───────────────────────────────────┐
+│                     agent/session.py                         │
+│              Per-conversation state container                │
+│    • LLM client, tool registry, context manager              │
+│    • Undo manager, loop detector, hook system                │
+└──────────────────────────┬───────────────────────────────────┘
+                           │
+        ┌──────────────────┼──────────────────┐
+        │                  │                  │
+        ▼                  ▼                  ▼
+┌───────────────┐  ┌───────────────┐  ┌───────────────┐
+│ client/       │  │ context/      │  │ tools/        │
+│ LLM API       │  │ History &     │  │ File, Shell,  │
+│ (OpenRouter)  │  │ Compression   │  │ Web, MCP...   │
+└───────────────┘  └───────────────┘  └───────────────┘
+```
 
-### Context Management
+## Directory Structure
 
-- Automatic context compression when approaching token limits
-- Tool output pruning to manage context size
-- Token usage tracking
+### `agent/`
+The brain of the system.
 
-### Safety and Approval
+- **agent.py** - Main loop. Calls LLM, gets response, executes tools, repeats until done. Handles parallel execution when multiple independent tools are called.
+- **session.py** - Holds all the state for one conversation: client, tools, context, undo history.
+- **undo.py** - Tracks file changes so users can `/undo` mistakes.
+- **events.py** - Event types for streaming UI updates (text deltas, tool starts/completions).
+- **persistence.py** - Save/load sessions to disk.
 
-- Multiple approval policies: on-request, auto, never, yolo
-- Dangerous command detection and blocking
-- Path-based safety checks
-- User confirmation prompts for mutating operations
+### `client/`
+Talks to the LLM.
 
-### Session Management
+- **llm_client.py** - Async OpenAI-compatible client with streaming. Handles retries for rate limits.
+- **response.py** - Data classes for streaming events, tool calls, token usage.
 
-- Save and resume sessions
-- Create checkpoints
-- Persistent session storage
+### `context/`
+Manages conversation history.
 
-### MCP Integration
+- **manager.py** - Stores messages, generates system prompts, tracks token usage.
+- **compaction.py** - When context gets too long, summarizes older messages to free up space.
+- **loop_detector.py** - Detects when the agent is stuck repeating the same action.
 
-- Connect to Model Context Protocol servers
-- Use tools from MCP servers
-- Support for stdio and HTTP/SSE transports
+### `tools/`
+Everything the agent can do.
 
-### Subagents
+- **base.py** - Base `Tool` class. Every tool inherits from this. Defines `execute()`, `get_confirmation()`, etc.
+- **registry.py** - Central registry. Tools register here, agent looks them up by name.
+- **parallel.py** - Dependency analyzer for parallel execution. Figures out which tools can run at the same time.
 
-- Specialized subagents for specific tasks
-- Built-in subagents: codebase investigator, code reviewer
-- Configurable subagent definitions with custom tools and limits
+#### `tools/builtin/`
+Built-in tools:
 
-### Loop Detection
+| Tool | What it does |
+|------|--------------|
+| `read_file.py` | Read file contents |
+| `write_file.py` | Create or overwrite files |
+| `edit_file.py` | Surgical find-and-replace edits |
+| `shell.py` | Run shell commands |
+| `list_dir.py` | List directory contents |
+| `glob.py` | Find files by pattern |
+| `grep.py` | Search file contents |
+| `web_search.py` | Search the web |
+| `web_fetch.py` | Fetch a URL |
+| `memory.py` | Persistent key-value storage |
+| `todos.py` | Task list management |
 
-- Detects repeating actions
-- Prevents infinite loops in agent execution
+#### `tools/mcp/`
+Model Context Protocol integration.
 
-### Hooks System
+- **mcp_manager.py** - Starts and manages MCP server processes.
+- **mcp_client.py** - Communicates with MCP servers via stdio or HTTP.
+- **mcp_tool.py** - Wraps MCP tools so they look like regular tools.
 
-- Execute scripts before/after agent runs
-- Execute scripts before/after tool calls
-- Error handling hooks
-- Custom commands and scripts
+#### `tools/subagents.py`
+Spawn mini-agents for specific tasks (code review, codebase investigation).
 
-### Configuration
+### `config/`
+Configuration loading.
 
-- Configurable working directory
-- Tool allowlisting
-- Developer and user instructions
-- Shell environment policies
-- MCP server configuration
+- **config.py** - Pydantic models for all config options.
+- **loader.py** - Loads from `~/.config/ai-agent/config.toml` and `.ai-agent/config.toml`.
 
-### User Interface
+### `safety/`
+Keeps things safe.
 
-- Terminal UI with formatted output
-- Command interface: /help, /config, /tools, /mcp, /stats, /save, /resume, /checkpoint, /restore
-- Real-time tool call visualization
+- **approval.py** - Decides what needs user confirmation. Blocks dangerous commands like `rm -rf /`.
+
+### `hooks/`
+Extensibility.
+
+- **hook_system.py** - Run scripts before/after agent runs or tool calls.
+
+### `prompts/`
+System prompt generation.
+
+- **system.py** - Builds the system prompt with environment info, tool descriptions, user instructions.
+
+### `ui/`
+Terminal interface.
+
+- **tui.py** - Rich-based terminal UI. Formats tool calls, diffs, streaming text.
+
+## Key Flows
+
+### 1. User sends a message
+
+```
+User input
+    → agent.run(message)
+    → context_manager.add_user_message()
+    → _agentic_loop() starts
+```
+
+### 2. Agentic loop
+
+```
+while turns < max_turns:
+    1. Check if context needs compression
+    2. Call LLM with messages + tool schemas
+    3. Stream response text to UI
+    4. If tool calls returned:
+       - Group independent calls into parallel batches
+       - Execute each batch (parallel or sequential)
+       - Record changes for undo
+       - Add results to context
+       - Check for loops
+    5. If no tool calls, we're done
+```
+
+### 3. Tool execution
+
+```
+tool_registry.invoke(name, params)
+    → tool.validate_params()
+    → approval_manager.check_approval()
+    → hook_system.trigger_before_tool()
+    → tool.execute()
+    → undo_manager.record_change() (if file modified)
+    → hook_system.trigger_after_tool()
+```
+
+### 4. Parallel execution
+
+When the LLM requests multiple tools at once:
+
+```
+DependencyAnalyzer.group_parallel_calls()
+    → Analyze each tool's file reads/writes
+    → Group non-conflicting tools together
+    → Shell commands always run alone
+
+For each batch:
+    → asyncio.gather(*[invoke(tool) for tool in batch])
+```
+
+## Configuration
+
+Create `.ai-agent/config.toml` in your project:
+
+```toml
+[model]
+name = "anthropic/claude-3.5-sonnet"
+temperature = 0.7
+context_window = 128000
+
+[agent]
+max_turns = 100
+approval = "on-request"    # on-request | auto | yolo
+parallel_tools = true
+max_parallel_tools = 5
+
+[mcp_servers.example]
+command = "npx"
+args = ["-y", "@anthropic/mcp-server"]
+```
+
+Or create `AGENT.md` in your project root for custom instructions.
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Show help |
+| `/undo [N]` | Undo last N file changes |
+| `/history` | Show undo history |
+| `/config` | Show current config |
+| `/tools` | List available tools |
+| `/mcp` | MCP server status |
+| `/stats` | Session statistics |
+| `/save` | Save session |
+| `/resume <id>` | Resume saved session |
+| `/exit` | Quit |
+
+## Adding a New Tool
+
+1. Create a file in `tools/builtin/`:
+
+```python
+from tools.base import Tool, ToolInvocation, ToolResult, ToolKind
+from pydantic import BaseModel, Field
+
+class MyToolParams(BaseModel):
+    arg1: str = Field(..., description="What this arg does")
+
+class MyTool(Tool):
+    name = "my_tool"
+    description = "What this tool does"
+    kind = ToolKind.READ  # or WRITE, SHELL, NETWORK
+    schema = MyToolParams
+
+    async def execute(self, invocation: ToolInvocation) -> ToolResult:
+        params = MyToolParams(**invocation.params)
+        # do stuff
+        return ToolResult.success_result("output")
+```
+
+2. Register it in `tools/builtin/__init__.py`:
+
+```python
+def get_all_builtin_tools():
+    return [
+        # ... existing tools
+        MyTool,
+    ]
+```
+
+## Requirements
+
+- Python 3.11+
+- API key from OpenRouter or compatible provider
+
+## License
+
+MIT

@@ -103,6 +103,17 @@ class Config(BaseModel):
     developer_instructions: str | None = None
     user_instructions: str | None = None
 
+    parallel_tools: bool = Field(
+        True,
+        description="Enable parallel tool execution",
+    )
+    max_parallel_tools: int = Field(
+        5,
+        ge=1,
+        le=20,
+        description="Maximum number of tools to execute in parallel",
+    )
+
     debug: bool = False
 
     @property

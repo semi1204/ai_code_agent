@@ -2,6 +2,8 @@
 
 A terminal-based AI assistant for pair programming. It can read, write, and execute code in your project.
 
+> I saw [opencode](https://github.com/opencode-ai/opencode) and thought it looked cool, so I built this to learn how AI coding agents work under the hood.
+
 ## Getting Started
 
 ```bash

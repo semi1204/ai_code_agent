@@ -3,7 +3,8 @@ from typing import Any
 import uuid
 from config.config import Config
 from context.compaction import ChatCompactor
-from context.loop_detector import LoopDetector
+from collections import deque
+from context import loop_detector
 from context.manager import ContextManager
 from tools import discovery
 from tools.builtin import memory
@@ -17,7 +18,7 @@ class Session:
         self.context_manager: ContextManager | None = None
         self.mcp: dict = {}  # server name -> MCPClient
         self.chat_compactor = ChatCompactor(config)
-        self.loop_detector = LoopDetector()
+        self.history: deque = deque(maxlen=loop_detector.WINDOW)  # recent actions for loop detection
         self.session_id = str(uuid.uuid4())
         self.created_at = datetime.now()
         self.updated_at = datetime.now()

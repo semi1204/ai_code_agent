@@ -4,6 +4,7 @@ from typing import AsyncGenerator
 from agent.events import AgentEvent, AgentEventType
 from agent import undo
 from agent.session import Session
+from context import loop_detector
 from hooks.hook_system import run_hooks
 from tools.mcp import mcp_manager
 import json
@@ -95,10 +96,7 @@ class Agent:
             )
             if response_text:
                 yield AgentEvent.text_complete(response_text)
-                self.session.loop_detector.record_action(
-                    "response",
-                    text=response_text,
-                )
+                loop_detector.record(self.session, "response", {"text": response_text})
 
             if not tool_calls:
                 if usage:
@@ -121,9 +119,7 @@ class Agent:
                 for batch in batches:
                     for name, call_id, args in batch:
                         yield AgentEvent.tool_call_start(call_id, name, args)
-                        self.session.loop_detector.record_action(
-                            "tool_call", tool_name=name, args=args
-                        )
+                        loop_detector.record(self.session, name, args)
 
                     async def invoke_tool(
                         name: str, call_id: str, args: dict
@@ -158,11 +154,7 @@ class Agent:
                         tool_call["arguments"],
                     )
 
-                    self.session.loop_detector.record_action(
-                        "tool_call",
-                        tool_name=tool_call["name"],
-                        args=tool_call["arguments"],
-                    )
+                    loop_detector.record(self.session, tool_call["name"], tool_call["arguments"])
 
                     result = await registry.invoke(self.session, tool_call["name"], tool_call["arguments"])
 
@@ -181,10 +173,8 @@ class Agent:
 
             undo.commit(self.session, f"Turn {self.session.turn_count}: {', '.join(tc['name'] for tc in tool_calls)}")
 
-            loop_detection_error = self.session.loop_detector.check_for_loop()
-            if loop_detection_error:
-                loop_prompt = create_loop_breaker_prompt(loop_detection_error)
-                self.session.context_manager.add_user_message(loop_prompt)
+            if found := loop_detector.check(self.session):
+                self.session.context_manager.add_user_message(create_loop_breaker_prompt(found))
 
             if usage:
                 self.session.context_manager.set_latest_usage(usage)

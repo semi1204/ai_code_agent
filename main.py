@@ -92,7 +92,7 @@ class CLI:
 
     async def cmd_clear(self, args):
         self.agent.session.context_manager.clear()
-        self.agent.session.loop_detector.clear()
+        self.agent.session.history.clear()
         print(f"{GREEN}Conversation cleared{RESET}")
 
     async def cmd_config(self, args):

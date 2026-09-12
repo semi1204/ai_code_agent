@@ -1,43 +1,13 @@
-from typing import Any
-from config.config import Config
-from tools.base import Tool, ToolInvocation, ToolKind, ToolResult
-from tools.mcp.client import MCPClient
+"""Wraps one MCP server tool as the function tool <server>__<tool>."""
+
+from tools.base import tool
 
 
-class MCPTool(Tool):
+def register(server: str, info: dict) -> None:
+    schema = dict(info["input_schema"] or {})
+    schema.setdefault("type", "object")
+    schema.setdefault("properties", {})
 
-    def __init__(
-        self,
-        config: Config,
-        client: MCPClient,
-        tool_info: dict,
-        name: str,
-    ) -> None:
-        super().__init__(config)
-        self._tool_info = tool_info
-        self._client = client
-        self.name = name
-        self.description = self._tool_info["description"]
-
-    @property
-    def schema(self) -> dict[str, Any]:
-        input_schema = self._tool_info["input_schema"] or {}
-        return {
-            "type": "object",
-            "properties": input_schema.get("properties", {}),
-            "required": input_schema.get("required", []),
-        }
-
-    def is_mutating(self, params) -> bool:
-        return True
-
-    kind = ToolKind.MCP
-
-    async def execute(self, invocation: ToolInvocation) -> ToolResult:
-        try:
-            output = await self._client.call_tool(self._tool_info["name"], invocation.params)
-            if output.startswith("error:"):
-                return ToolResult.error_result(output)
-            return ToolResult.success_result(output)
-        except Exception as e:
-            return ToolResult.error_result(f"MCP tool failed: {e}")
+    @tool(f"{server}__{info['name']}", info["description"], schema, kind="mcp")
+    async def call(args, s):  # the client is looked up per session, so sessions never share connections
+        return await s.mcp[server].call_tool(info["name"], args)

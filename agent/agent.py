@@ -4,6 +4,7 @@ from typing import AsyncGenerator
 from agent.events import AgentEvent, AgentEventType
 from agent import undo
 from agent.session import Session
+from tools.mcp import mcp_manager
 import json
 from client.llm_client import chat
 from config.config import Config
@@ -201,5 +202,5 @@ class Agent:
         exc_tb,
     ) -> None:
         if self.session:
-            await self.session.mcp_manager.shutdown()
+            await mcp_manager.shutdown(self.session)
             self.session = None

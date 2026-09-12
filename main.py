@@ -11,6 +11,7 @@ from agent.persistence import PersistenceManager, SessionSnapshot
 from agent.session import Session
 from config.config import APPROVAL_POLICIES
 from config.loader import load_config
+from tools.mcp import mcp_manager
 from ui import tui
 from ui.tui import BLUE, BOLD, DIM, GREEN, RED, RESET, YELLOW
 
@@ -130,7 +131,7 @@ class CLI:
             print(f"  • {tool.name}")
 
     async def cmd_mcp(self, args):
-        servers = self.agent.session.mcp_manager.get_all_servers()
+        servers = mcp_manager.status(self.agent.session)
         print(f"\n{BOLD}MCP Servers ({len(servers)}){RESET}")
         for s in servers:
             color = GREEN if s["status"] == "connected" else RED
@@ -159,7 +160,7 @@ class CLI:
                 cm.add_assistant_message(m.get("content", ""), m.get("tool_calls"))
             elif m["role"] == "tool":
                 cm.add_tool_result(m.get("tool_call_id", ""), m.get("content", ""))
-        await self.agent.session.mcp_manager.shutdown()
+        await mcp_manager.shutdown(self.agent.session)
         self.agent.session = session
 
     async def cmd_save(self, args):

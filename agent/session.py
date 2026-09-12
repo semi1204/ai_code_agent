@@ -6,9 +6,9 @@ from context.compaction import ChatCompactor
 from context.loop_detector import LoopDetector
 from context.manager import ContextManager
 from hooks.hook_system import HookSystem
+from tools import discovery
 from tools.builtin import memory
-from tools.discovery import ToolDiscoveryManager
-from tools.mcp.mcp_manager import MCPManager
+from tools.mcp import mcp_manager
 from tools.registry import create_default_registry
 
 
@@ -17,11 +17,7 @@ class Session:
         self.config = config
         self.tool_registry = create_default_registry(config)
         self.context_manager: ContextManager | None = None
-        self.discovery_manager = ToolDiscoveryManager(
-            self.config,
-            self.tool_registry,
-        )
-        self.mcp_manager = MCPManager(self.config)
+        self.mcp: dict = {}  # server name -> MCPClient
         self.chat_compactor = ChatCompactor(config)
         self.loop_detector = LoopDetector()
         self.hook_system = HookSystem(config)
@@ -35,10 +31,8 @@ class Session:
         self.turn_count = 0
 
     async def initialize(self) -> None:
-        await self.mcp_manager.initialize()
-        self.mcp_manager.register_tools(self.tool_registry)
-
-        self.discovery_manager.discover_all()
+        await mcp_manager.connect_all(self)
+        discovery.load_plugins(self.config)
         self.context_manager = ContextManager(
             config=self.config,
             user_memory=self._load_memory(),
@@ -63,5 +57,5 @@ class Session:
             "message_count": self.context_manager.message_count,
             "token_usage": self.context_manager.total_usage,
             "tools_count": len(self.tool_registry.get_tools()),
-            "mcp_servers": sum(1 for srv in self.mcp_manager.get_all_servers() if srv["status"] == "connected"),
+            "mcp_servers": sum(1 for c in self.mcp.values() if c.status == "connected"),
         }

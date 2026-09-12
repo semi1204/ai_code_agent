@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 from safety import approval
 from tools.base import TOOLS, Tool, ToolInvocation, ToolKind, ToolResult, make_schema, run_tool
-from tools.builtin import get_all_builtin_tools
-from tools.subagents import SubagentTool, get_default_subagent_definitions
+import tools.builtin  # noqa: F401  (registers the builtin function tools)
+import tools.subagents  # noqa: F401  (registers subagent_* tools)
 
 
 class ToolRegistry:
@@ -75,9 +75,4 @@ def _fail(message: str) -> ToolResult:
 
 
 def create_default_registry(config) -> ToolRegistry:
-    registry = ToolRegistry(config)
-    for tool_class in get_all_builtin_tools():
-        registry.register(tool_class(config))
-    for definition in get_default_subagent_definitions():
-        registry.register(SubagentTool(config, definition))
-    return registry
+    return ToolRegistry(config)

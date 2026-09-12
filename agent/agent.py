@@ -9,7 +9,7 @@ from agent.session import Session
 from client.llm_client import chat
 from context import compaction, loop_detector, manager
 from hooks.hook_system import run_hooks
-from prompts.system import create_loop_breaker_prompt, get_system_prompt
+from prompts.system import LOOP_BREAKER, get_system_prompt
 from tools import discovery, registry
 from tools.builtin import memory
 from tools.mcp import mcp_manager
@@ -23,7 +23,7 @@ async def start(config) -> Session:
     discovery.load_plugins(config)
     entries = memory.load()
     notes = "User preferences and notes:\n" + "\n".join(f"- {k}: {v}" for k, v in entries.items()) if entries else None
-    s.system_prompt = get_system_prompt(config, notes, [registry.info(n) for n in registry.names(s)])
+    s.system_prompt = get_system_prompt(config, notes, registry.names(s))
     return s
 
 
@@ -73,7 +73,7 @@ async def run(s: Session, message: str):
                 manager.add_tool(s, call["id"], output)
         undo.commit(s, f"Turn {s.turns}: {', '.join(c['name'] for c in calls)}")
         if found := loop_detector.check(s):
-            manager.add_user(s, create_loop_breaker_prompt(found))
+            manager.add_user(s, LOOP_BREAKER.format(reason=found))
         manager.prune_tool_outputs(s)
         if manager.needs_compaction(s):
             await compaction.compact(s)

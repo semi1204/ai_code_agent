@@ -4,7 +4,7 @@ import sys
 
 from client.llm_client import chat
 from context import manager
-from prompts.system import get_compression_prompt
+from prompts.system import COMPRESSION_PROMPT
 from ui.tui import DIM, RESET
 
 LIMITS = {"tool": 2000, "assistant": 3000, "user": 1500}  # chars of each message shown to the summariser
@@ -49,7 +49,7 @@ async def compact(s) -> bool:
     """Summarise s.messages into three synthetic messages. Returns False (with a warning) if that failed."""
     if len(s.messages) < 3:
         return False
-    request = [{"role": "system", "content": get_compression_prompt()}, {"role": "user", "content": _transcript(s.messages)}]
+    request = [{"role": "system", "content": COMPRESSION_PROMPT}, {"role": "user", "content": _transcript(s.messages)}]
     summary, usage = "", None
     async for kind, payload in chat(s.config, request, stream=False):
         if kind == "text":

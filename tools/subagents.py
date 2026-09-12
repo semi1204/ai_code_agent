@@ -37,7 +37,7 @@ def _register(name: str, spec: dict) -> None:
         config = dataclasses.replace(s.config, max_turns=spec["max_turns"], allowed_tools=spec["tools"])
         # a fresh conversation that shares the parent's MCP connections, undo history and usage totals
         sub = dataclasses.replace(s, config=config, messages=[], last_usage={}, todos={}, pending=[], history=deque(maxlen=20), turns=0)
-        sub.system_prompt = get_system_prompt(config, None, [registry.info(n) for n in registry.names(sub)])
+        sub.system_prompt = get_system_prompt(config, None, registry.names(sub))
         prompt = textwrap.dedent(f"""\
             You are a specialized sub-agent with a specific task to complete.
 

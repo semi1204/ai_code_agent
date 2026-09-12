@@ -1,46 +1,13 @@
-from datetime import datetime
+"""The system prompt and the other fixed prompts."""
+
+import os
 import platform
-from config.config import Config
+import sys
+from datetime import datetime
 
+from tools.base import TOOLS
 
-def get_system_prompt(
-    config: Config,
-    user_memory: str | None = None,
-    tools: list | None = None,
-) -> str:
-    parts = []
-
-    # Identity and role
-    parts.append(_get_identity_section())
-    # Environment
-    parts.append(_get_environment_section(config))
-
-    if tools:
-        parts.append(_get_tool_guidelines_section(tools))
-
-    # AGENTS.md spec
-    parts.append(_get_agents_md_section())
-
-    # Security guidelines
-    parts.append(_get_security_section())
-
-    if config.developer_instructions:
-        parts.append(_get_developer_instructions_section(config.developer_instructions))
-
-    if config.user_instructions:
-        parts.append(_get_user_instructions_section(config.user_instructions))
-
-    if user_memory:
-        parts.append(_get_memory_section(user_memory))
-    # Operational guidelines
-    parts.append(_get_operational_section())
-
-    return "\n\n".join(parts)
-
-
-def _get_identity_section() -> str:
-    """Generate the identity section."""
-    return """# Identity
+IDENTITY = """# Identity
 
 You are an AI coding agent, a terminal-based coding assistant. You are expected to be precise, safe and helpful.
 
@@ -52,38 +19,7 @@ Your capabilities:
 
 You are pair programming with the user to help them accomplish their goals. You should be proactive, thorough and focused on delivering high-quality results."""
 
-
-def _get_environment_section(config: Config) -> str:
-    """Generate the environment section."""
-    now = datetime.now()
-    os_info = f"{platform.system()} {platform.release()}"
-
-    return f"""# Environment
-
-- **Current Date**: {now.strftime("%A, %B %d, %Y")}
-- **Operating System**: {os_info}
-- **Working Directory**: {config.cwd}
-- **Shell**: {_get_shell_info()}
-
-The user has granted you access to run tools in service of their request. Use them when needed."""
-
-
-def _get_shell_info() -> str:
-    """Get shell information based on platform."""
-    import os
-    import sys
-
-    if sys.platform == "darwin":
-        return os.environ.get("SHELL", "/bin/zsh")
-    elif sys.platform == "win32":
-        return "PowerShell/cmd.exe"
-    else:
-        return os.environ.get("SHELL", "/bin/bash")
-
-
-def _get_agents_md_section() -> str:
-    """Generate AGENTS.md spec section."""
-    return """# AGENTS.md Specification
+AGENTS_MD = """# AGENTS.md Specification
 
 - Repos often contain AGENTS.md files. These files can appear anywhere within the repository.
 - These files are a way for humans to give you (the agent) instructions or tips for working within the container.
@@ -94,12 +30,9 @@ def _get_agents_md_section() -> str:
     - Instructions about code style, structure, naming, etc. apply only to code within the AGENTS.md file's scope, unless the file states otherwise.
     - More-deeply-nested AGENTS.md files take precedence in the case of conflicting instructions.
     - Direct system/developer/user instructions (as part of a prompt) take precedence over AGENTS.md instructions.
-- The contents of the AGENTS.md file at the root of the repo and any directories from the CWD up to the root are included with the developer message and don't need to be re-read. When working in a subdirectory of CWD, or a directory outside the CWD, check for any AGENTS.md files that may be applicable."""
+- The AGENTS.md in the working directory (if any) is included below under Project Instructions and does not need to be re-read. When working in a subdirectory, or outside the working directory, check for other AGENTS.md files that may apply."""
 
-
-def _get_security_section() -> str:
-    """Generate security guidelines."""
-    return """# Security Guidelines
+SECURITY = """# Security Guidelines
 
 1. **Never expose secrets**: Do not output API keys, passwords, tokens, or other sensitive data.
 
@@ -113,10 +46,41 @@ def _get_security_section() -> str:
 
 6. **Security First**: Always apply security best practices. Never introduce code that exposes, logs, or commits secrets, API keys, or other sensitive information."""
 
+BEST_PRACTICES = """
+## Best Practices
 
-def _get_operational_section() -> str:
-    """Generate operational guidelines."""
-    return """# Operational Guidelines
+1. **File Operations**:
+   - Use `read_file` before editing to understand current content
+   - Use `edit` for surgical changes (search/replace)
+   - Use `write_file` for creating new files or complete rewrites
+
+2. **Search and Discovery**:
+   - Use `grep` to find code by content
+   - Use `glob` to find files by name pattern
+   - Use `list_dir` to explore directory structure
+
+3. **Shell Commands**:
+   - Use `shell` for running commands, tests, builds
+   - Prefer read-only commands when just gathering information
+   - Be cautious with commands that modify state
+
+4. **Task Management**:
+   - Use `todos` to track multi-step tasks
+   - Mark tasks as completed as you finish them
+
+5. **Memory**:
+   - Use `memory` to store important user preferences
+   - Retrieve stored preferences when relevant"""
+
+SUBAGENT_PRACTICES = """
+6. **Sub-Agents**:
+   - Use sub-agents for complex codebase exploration, code review, or specialized multi-step tasks
+   - Sub-agents run with isolated context and have limited tool access
+   - Provide clear, specific goals when invoking sub-agents
+   - For simple queries (like finding a specific function), use direct tools (`grep`, `read_file`) instead
+   - Use sub-agents when the task involves complex refactoring, codebase exploration, or system-wide analysis"""
+
+OPERATIONAL = """# Operational Guidelines
 
 ## Tone and Style (CLI Interaction)
 
@@ -154,7 +118,7 @@ You are a coding agent. Please keep going until the query is completely resolved
 
 - **Parallelism:** Execute multiple independent tool calls in parallel when feasible (i.e. searching the codebase, reading multiple files). Maximize use of parallel tool calls where possible to increase efficiency. However, if some tool calls depend on previous calls to inform dependent values, do NOT call these tools in parallel and instead call them sequentially.
 - **Command Execution:** Use the `shell` tool for running shell commands. Before executing commands that modify the file system, codebase, or system state, provide a brief explanation of the command's purpose and potential impact. When searching for text or files, prefer using `rg` or `rg --files` respectively because `rg` is much faster than alternatives like `grep`. (If the `rg` command is not found, then use alternatives.)
-- **File Operations:** Use specialized tools instead of bash commands when possible, as this provides a better user experience. For file operations, use dedicated tools: `read_file` for reading files instead of cat/head/tail, `edit` for single-file editing instead of sed/awk, `apply_patch` for multi-file edits (2+ files), and `write_file` for creating files instead of cat with heredoc or echo redirection. Reserve bash tools exclusively for actual system commands and terminal operations that require shell execution. NEVER use bash echo or other command-line tools to communicate thoughts, explanations, or instructions to the user. Output all communication directly in your response text instead.
+- **File Operations:** Use specialized tools instead of bash commands when possible, as this provides a better user experience. For file operations, use dedicated tools: `read_file` for reading files instead of cat/head/tail, `edit` for editing instead of sed/awk, and `write_file` for creating files instead of cat with heredoc or echo redirection. Reserve bash tools exclusively for actual system commands and terminal operations that require shell execution. NEVER use bash echo or other command-line tools to communicate thoughts, explanations, or instructions to the user. Output all communication directly in your response text instead.
 - **File Creation:** Do not create new files unless necessary for achieving your goal or explicitly requested. Prefer editing an existing file when possible. This includes markdown files.
 - **Remembering Facts:** Use the `memory` tool to remember specific, *user-related* facts or preferences when the user explicitly asks, or when they state a clear, concise piece of information that would help personalize or streamline *your future interactions with them* (e.g., preferred coding style, common project paths they use, personal tool aliases). This tool is for user-specific information that should persist across sessions. Do *not* use it for general project context or information.
 - **Task Management:** Use the `todos` tool to track multi-step tasks. Mark tasks as completed as soon as you finish each task. Do not batch up multiple tasks before marking them as completed. Use the todos tool VERY frequently to ensure that you are tracking your tasks and giving the user visibility into your progress. These tools are also EXTREMELY helpful for planning tasks, and for breaking down larger complex tasks into smaller steps.
@@ -188,106 +152,11 @@ If completing the user's task requires writing or modifying files, your code and
 - Update documentation as necessary.
 - Keep changes consistent with the style of the existing codebase. Changes should be minimal and focused on the task.
 - NEVER add copyright or license headers unless specifically requested.
-- Do not waste tokens by re-reading files after calling `apply_patch` on them. The tool call will fail if it didn't work. The same goes for making folders, deleting folders, etc.
+- Do not waste tokens by re-reading files after editing them; the tool call fails if the edit did not apply. The same goes for making or deleting folders.
 - Do not add inline comments within code unless explicitly requested.
 - Do not use one-letter variable names unless explicitly requested."""
 
-
-def _get_developer_instructions_section(instructions: str) -> str:
-    return f"""# Project Instructions
-
-The following instructions were provided by the project maintainers:
-
-{instructions}
-
-Follow these instructions carefully as they contain important context about this specific project."""
-
-
-def _get_user_instructions_section(instructions: str) -> str:
-    return f"""# User Instructions
-
-The user has provided the following custom instructions:
-
-{instructions}"""
-
-
-def _get_memory_section(memory: str) -> str:
-    """Generate user memory section."""
-    return f"""# Remembered Context
-
-The following information has been stored from previous interactions:
-
-{memory}
-
-Use this information to personalize your responses and maintain consistency."""
-
-
-def _get_tool_guidelines_section(tools: list) -> str:
-    """Generate tool usage guidelines."""
-
-    regular_tools = [t for t in tools if not t.name.startswith("subagent_")]
-    subagent_tools = [t for t in tools if t.name.startswith("subagent_")]
-
-    guidelines = """# Tool Usage Guidelines
-
-You have access to the following tools to accomplish your tasks:
-
-"""
-
-    for tool in regular_tools:
-        description = tool.description
-        if len(description) > 100:
-            description = description[:100] + "..."
-        guidelines += f"- **{tool.name}**: {description}\n"
-
-    if subagent_tools:
-        guidelines += "\n## Sub-Agents\n\n"
-        for tool in subagent_tools:
-            description = tool.description
-            if len(description) > 100:
-                description = description[:100] + "..."
-            guidelines += f"- **{tool.name}**: {description}\n"
-
-    guidelines += """
-## Best Practices
-
-1. **File Operations**:
-   - Use `read_file` before editing to understand current content
-   - Use `edit` for surgical changes (search/replace)
-   - Use `write_file` for creating new files or complete rewrites
-
-2. **Search and Discovery**:
-   - Use `grep` to find code by content
-   - Use `glob` to find files by name pattern
-   - Use `list_dir` to explore directory structure
-
-3. **Shell Commands**:
-   - Use `shell` for running commands, tests, builds
-   - Prefer read-only commands when just gathering information
-   - Be cautious with commands that modify state
-
-4. **Task Management**:
-   - Use `todos` to track multi-step tasks
-   - Mark tasks as completed as you finish them
-
-5. **Memory**:
-   - Use `memory` to store important user preferences
-   - Retrieve stored preferences when relevant"""
-
-    if subagent_tools:
-        guidelines += """
-6. **Sub-Agents**:
-   - Use sub-agents for complex codebase exploration, code review, or specialized multi-step tasks
-   - Sub-agents run with isolated context and have limited tool access
-   - Provide clear, specific goals when invoking sub-agents
-   - For simple queries (like finding a specific function), use direct tools (`grep`, `read_file`) instead
-   - Use sub-agents when the task involves complex refactoring, codebase exploration, or system-wide analysis"""
-
-    return guidelines
-
-
-def get_compression_prompt() -> str:
-    return """Provide a detailed continuation prompt for resuming this work. The new session will NOT have access to our conversation history.
+COMPRESSION_PROMPT = """Provide a detailed continuation prompt for resuming this work. The new session will NOT have access to our conversation history.
 
 IMPORTANT: Structure your response EXACTLY as follows:
 
@@ -314,13 +183,11 @@ IMPORTANT: Structure your response EXACTLY as follows:
 
 Be extremely specific with file paths and function names. The goal is to allow seamless continuation without redoing any completed work."""
 
-
-def create_loop_breaker_prompt(loop_description: str) -> str:
-    return f"""
+LOOP_BREAKER = """
 [SYSTEM NOTICE: Loop Detected]
 
 The system has detected that you may be stuck in a repetitive pattern:
-{loop_description}
+{reason}
 
 To break out of this loop, please:
 1. Stop and reflect on what you're trying to accomplish
@@ -330,3 +197,36 @@ To break out of this loop, please:
 
 Do not repeat the same action again.
 """
+
+
+def get_system_prompt(config, memory: str | None = None, tool_names: list[str] = ()) -> str:
+    shell = "PowerShell/cmd.exe" if sys.platform == "win32" else os.environ.get("SHELL", "/bin/sh")
+    environment = f"""# Environment
+
+- **Current Date**: {datetime.now():%A, %B %d, %Y}
+- **Operating System**: {platform.system()} {platform.release()}
+- **Working Directory**: {config.cwd}
+- **Shell**: {shell}
+
+The user has granted you access to run tools in service of their request. Use them when needed."""
+
+    regular = [n for n in tool_names if not n.startswith("subagent_")]
+    subagents = [n for n in tool_names if n.startswith("subagent_")]
+    listing = lambda names: "\n".join(f"- **{n}**: {TOOLS[n][0]}" for n in names)
+    tools = ""
+    if tool_names:
+        tools = f"# Tool Usage Guidelines\n\nYou have access to the following tools to accomplish your tasks:\n\n{listing(regular)}\n"
+        if subagents:
+            tools += f"\n## Sub-Agents\n\n{listing(subagents)}\n"
+        tools += BEST_PRACTICES + (SUBAGENT_PRACTICES if subagents else "")
+
+    project = config.developer_instructions and (
+        "# Project Instructions\n\nThe following instructions were provided by the project maintainers:\n\n"
+        f"{config.developer_instructions}\n\nFollow these instructions carefully as they contain important context about this specific project."
+    )
+    user = config.user_instructions and f"# User Instructions\n\nThe user has provided the following custom instructions:\n\n{config.user_instructions}"
+    remembered = memory and (
+        f"# Remembered Context\n\nThe following information has been stored from previous interactions:\n\n{memory}\n\n"
+        "Use this information to personalize your responses and maintain consistency."
+    )
+    return "\n\n".join(part for part in (IDENTITY, environment, tools, AGENTS_MD, SECURITY, project, user, remembered, OPERATIONAL) if part)

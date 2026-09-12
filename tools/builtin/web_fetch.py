@@ -1,55 +1,31 @@
-from urllib.parse import urlparse
+"""web_fetch: GET a URL and return its body as text."""
 
-import httpx
-from tools.base import Tool, ToolInvocation, ToolKind, ToolResult
-from pydantic import BaseModel, Field
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
+from tools.base import tool
 
-class WebFetchParams(BaseModel):
-    url: str = Field(..., description="URL to fetch (must be http:// or https://)")
-    timeout: int = Field(
-        30,
-        ge=5,
-        le=120,
-        description="Request timeout in seconds (default: 120)",
-    )
+MAX_BYTES = 100 * 1024
+USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
 
 
-class WebFetchTool(Tool):
-    name = "web_fetch"
-    description = "Fetch content from a URL. Returns the response body as text"
-    kind = ToolKind.NETWORK
-    schema = WebFetchParams
-
-    async def execute(self, invocation: ToolInvocation) -> ToolResult:
-        params = WebFetchParams(**invocation.params)
-
-        parsed = urlparse(params.url)
-        if not parsed.scheme or parsed.scheme not in ("http", "https"):
-            return ToolResult.error_result(f"Url must be http:// or https://")
-
-        try:
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(params.timeout),
-                follow_redirects=True,
-            ) as client:
-                response = await client.get(params.url)
-                response.raise_for_status()
-                text = response.text
-        except httpx.HTTPStatusError as e:
-            return ToolResult.error_result(
-                f"HTTP {e.response.status_code}: {e.response.reason_phrase}",
-            )
-        except Exception as e:
-            return ToolResult.error_result(f"Request failed: {e}")
-
-        if len(text) > 100 * 1024:
-            text = text[: 100 * 1024] + "\n... [content truncated]"
-
-        return ToolResult.success_result(
-            text,
-            metadata={
-                "status_code": response.status_code,
-                "content_length": len(response.content),
-            },
-        )
+@tool(
+    "web_fetch",
+    "Fetch an http(s) URL and return the response body as text (redirects followed, 100KB cap).",
+    {"url": "string", "timeout": "number?"},
+    kind="network",
+)
+def web_fetch(args, s):
+    url = args["url"]
+    if not url.startswith(("http://", "https://")):
+        return "error: url must start with http:// or https://"
+    timeout = min(max(int(args.get("timeout") or 30), 5), 120)
+    try:
+        with urlopen(Request(url, headers={"User-Agent": USER_AGENT}), timeout=timeout) as resp:
+            body = resp.read(MAX_BYTES + 1)
+            charset = resp.headers.get_content_charset() or "utf-8"
+    except HTTPError as e:
+        return f"error: HTTP {e.code}: {e.reason}"
+    except OSError as e:
+        return f"error: request failed: {e}"
+    return body[:MAX_BYTES].decode(charset, "replace") + ("\n... [content truncated]" if len(body) > MAX_BYTES else "")

@@ -11,6 +11,7 @@ from agent.persistence import PersistenceManager, SessionSnapshot
 from agent.session import Session
 from config.config import APPROVAL_POLICIES
 from config.loader import load_config
+from tools import registry
 from tools.mcp import mcp_manager
 from ui import tui
 from ui.tui import BLUE, BOLD, DIM, GREEN, RED, RESET, YELLOW
@@ -48,8 +49,8 @@ class CLI:
         print(f"\n{DIM}Goodbye!{RESET}")
 
     def tool_kind(self, name: str) -> str | None:
-        tool = self.agent.session.tool_registry.get(name)
-        return tool.kind.value if tool else None
+        tool = registry.info(name)
+        return tool.kind if tool else None
 
     async def process(self, message: str) -> str | None:
         streaming, final = False, None
@@ -70,7 +71,7 @@ class CLI:
             elif event.type == AgentEventType.TOOL_CALL_START:
                 tui.tool_start(d["name"], self.tool_kind(d["name"]), d.get("arguments", {}), self.config.cwd)
             elif event.type == AgentEventType.TOOL_CALL_COMPLETE:
-                tui.tool_end(d["name"], d.get("success", False), d.get("output", ""), d.get("error"), d.get("diff"))
+                tui.tool_end(d["name"], d["output"])
         return final
 
     # --- slash commands: each takes the argument string; returning False quits ---
@@ -125,10 +126,10 @@ class CLI:
             print(f"   {key}: {value}")
 
     async def cmd_tools(self, args):
-        tools = self.agent.session.tool_registry.get_tools()
-        print(f"\n{BOLD}Available tools ({len(tools)}){RESET}")
-        for tool in tools:
-            print(f"  • {tool.name}")
+        names = registry.names(self.agent.session)
+        print(f"\n{BOLD}Available tools ({len(names)}){RESET}")
+        for name in names:
+            print(f"  • {name}")
 
     async def cmd_mcp(self, args):
         servers = mcp_manager.status(self.agent.session)

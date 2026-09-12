@@ -1,13 +1,12 @@
 from datetime import datetime
 import platform
 from config.config import Config
-from tools.base import Tool
 
 
 def get_system_prompt(
     config: Config,
     user_memory: str | None = None,
-    tools: list[Tool] | None = None,
+    tools: list | None = None,
 ) -> str:
     parts = []
 
@@ -223,7 +222,7 @@ The following information has been stored from previous interactions:
 Use this information to personalize your responses and maintain consistency."""
 
 
-def _get_tool_guidelines_section(tools: list[Tool]) -> str:
+def _get_tool_guidelines_section(tools: list) -> str:
     """Generate tool usage guidelines."""
 
     regular_tools = [t for t in tools if not t.name.startswith("subagent_")]

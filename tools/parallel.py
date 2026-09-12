@@ -1,10 +1,8 @@
 from __future__ import annotations
-import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Awaitable
+from typing import Any
 
-from tools.base import ToolResult
 
 
 @dataclass
@@ -110,49 +108,3 @@ class DependencyAnalyzer:
                 batches.append(current_batch)
 
         return [[tool_calls[i] for i in batch] for batch in batches]
-
-
-class ParallelExecutor:
-    def __init__(self, analyzer: DependencyAnalyzer, max_parallel: int = 5):
-        self.analyzer = analyzer
-        self.max_parallel = max_parallel
-
-    async def execute_batch(
-        self,
-        batch: list[tuple[str, str, dict[str, Any]]],
-        execute_fn: Callable[[str, str, dict[str, Any]], Awaitable[ToolResult]],
-    ) -> list[tuple[str, str, dict[str, Any], ToolResult]]:
-        semaphore = asyncio.Semaphore(self.max_parallel)
-
-        async def execute_one(
-            name: str, call_id: str, args: dict[str, Any]
-        ) -> tuple[str, str, dict[str, Any], ToolResult]:
-            async with semaphore:
-                try:
-                    result = await execute_fn(name, call_id, args)
-                    return (name, call_id, args, result)
-                except Exception as e:
-                    error_result = ToolResult.error_result(
-                        f"Tool execution failed: {str(e)}"
-                    )
-                    return (name, call_id, args, error_result)
-
-        tasks = [execute_one(name, call_id, args) for name, call_id, args in batch]
-
-        results = await asyncio.gather(*tasks)
-        return list(results)
-
-    async def execute_all(
-        self,
-        tool_calls: list[tuple[str, str, dict[str, Any]]],
-        execute_fn: Callable[[str, str, dict[str, Any]], Awaitable[ToolResult]],
-        cwd: Path,
-    ) -> list[tuple[str, str, dict[str, Any], ToolResult]]:
-        batches = self.analyzer.group_parallel_calls(tool_calls, cwd)
-
-        all_results: list[tuple[str, str, dict[str, Any], ToolResult]] = []
-        for batch in batches:
-            batch_results = await self.execute_batch(batch, execute_fn)
-            all_results.extend(batch_results)
-
-        return all_results

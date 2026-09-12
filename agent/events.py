@@ -3,8 +3,6 @@ from enum import Enum
 from dataclasses import dataclass, field
 from typing import Any
 
-from tools.base import ToolResult
-
 
 class AgentEventType(str, Enum):
     # Agent lifecycle
@@ -84,23 +82,8 @@ class AgentEvent:
         )
 
     @classmethod
-    def tool_call_complete(
-        cls,
-        call_id: str,
-        name: str,
-        result: ToolResult,
-    ):
+    def tool_call_complete(cls, call_id: str, name: str, output: str):
         return cls(
             type=AgentEventType.TOOL_CALL_COMPLETE,
-            data={
-                "call_id": call_id,
-                "name": name,
-                "success": result.success,
-                "output": result.output,
-                "error": result.error,
-                "metadata": result.metadata,
-                "diff": result.diff.to_diff() if result.diff else None,
-                "truncated": result.truncated,
-                "exit_code": result.exit_code,
-            },
+            data={"call_id": call_id, "name": name, "output": output, "success": not output.startswith("error:")},
         )

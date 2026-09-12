@@ -9,7 +9,7 @@ import json
 from client.llm_client import chat
 from config.config import Config
 from prompts.system import create_loop_breaker_prompt
-from tools.base import ToolResult
+from tools import registry
 from tools.parallel import DependencyAnalyzer
 
 
@@ -53,7 +53,7 @@ class Agent:
                     self.session.context_manager.set_latest_usage(usage)
                     self.session.context_manager.add_usage(usage)
 
-            tool_schemas = self.session.tool_registry.get_schemas()
+            tool_schemas = registry.schemas(self.session)
 
             tool_calls: list[dict] = []
             usage: dict | None = None
@@ -125,15 +125,15 @@ class Agent:
 
                     async def invoke_tool(
                         name: str, call_id: str, args: dict
-                    ) -> tuple[str, str, ToolResult]:
-                        result = await self.session.tool_registry.invoke(self.session, name, args)
+                    ) -> tuple[str, str, str]:
+                        result = await registry.invoke(self.session, name, args)
                         return (name, call_id, result)
 
                     semaphore = asyncio.Semaphore(self.config.max_parallel_tools)
 
                     async def invoke_with_semaphore(
                         name: str, call_id: str, args: dict
-                    ) -> tuple[str, str, ToolResult]:
+                    ) -> tuple[str, str, str]:
                         async with semaphore:
                             return await invoke_tool(name, call_id, args)
 
@@ -146,7 +146,7 @@ class Agent:
                     for name, call_id, result in results:
                         yield AgentEvent.tool_call_complete(call_id, name, result)
                         tool_call_results.append(
-                            (call_id, result.to_model_output())
+                            (call_id, result)
                         )
             else:
                 for tool_call in tool_calls:
@@ -162,7 +162,7 @@ class Agent:
                         args=tool_call["arguments"],
                     )
 
-                    result = await self.session.tool_registry.invoke(self.session, tool_call["name"], tool_call["arguments"])
+                    result = await registry.invoke(self.session, tool_call["name"], tool_call["arguments"])
 
                     yield AgentEvent.tool_call_complete(
                         tool_call["id"],
@@ -171,7 +171,7 @@ class Agent:
                     )
 
                     tool_call_results.append(
-                        (tool_call["id"], result.to_model_output())
+                        (tool_call["id"], result)
                     )
 
             for call_id, content in tool_call_results:

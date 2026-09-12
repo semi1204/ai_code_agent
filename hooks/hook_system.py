@@ -6,7 +6,6 @@ import sys
 import tempfile
 from typing import Any
 from config.config import Config, HookConfig
-from tools.base import ToolResult
 
 
 class HookSystem:
@@ -122,11 +121,11 @@ class HookSystem:
         self,
         tool_name: str,
         tool_params: dict[str, Any],
-        tool_result: ToolResult,
+        tool_result: str,
     ) -> None:
         env = self._build_env("after_tool", tool_name=tool_name)
         env["AI_AGENT_TOOL_PARAMS"] = json.dumps(tool_params)
-        env["AI_AGENT_TOOL_RESULT"] = tool_result.to_model_output()
+        env["AI_AGENT_TOOL_RESULT"] = tool_result
 
         for hook in self.hooks:
             if hook.trigger == "after_tool":

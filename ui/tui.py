@@ -56,14 +56,11 @@ def print_diff(diff: str) -> None:
         print(f"  {color}{line}{RESET}")
 
 
-def tool_end(name: str, success: bool, output: str, error: str | None, diff: str | None) -> None:
-    if not success:
-        print(f"  {RED}⎿  {(error or output or 'failed').splitlines()[0][:100]}{RESET}")
+def tool_end(name: str, output: str) -> None:
+    if output.startswith("error:"):
+        print(f"  {RED}⎿  {output.splitlines()[0][:100]}{RESET}")
         return
-    if diff:
-        print_diff(diff)
-        return
-    lines = (output or "").splitlines() or ["(empty)"]
+    lines = output.splitlines() or ["(empty)"]
     preview = lines[0][:60] + ("..." if len(lines[0]) > 60 else "")
     if len(lines) > 1:
         preview += f" ... +{len(lines) - 1} lines"
@@ -73,15 +70,13 @@ def tool_end(name: str, success: bool, output: str, error: str | None, diff: str
 # --- approval prompt ---
 
 
-def confirm(name: str, args: dict, diff: str | None = None) -> bool:
+def confirm(name: str, args: dict) -> bool:
     """Ask y/N before running a tool; a non-interactive stdin rejects."""
     print(f"\n{YELLOW}⚠ Approval required{RESET}: {BOLD}{name}{RESET}")
     for key, value in args.items():
         lines = str(value).splitlines() or [""]
         shown = "\n    ".join(lines[:8]) + (f"\n    … (+{len(lines) - 8} lines)" if len(lines) > 8 else "")
         print(f"  {YELLOW if key == 'command' else DIM}{key}: {shown}{RESET}")
-    if diff:
-        print_diff(diff)
     if not sys.stdin.isatty():
         print(f"  {RED}⎿  rejected (stdin is not a terminal){RESET}")
         return False

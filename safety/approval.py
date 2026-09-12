@@ -79,11 +79,11 @@ def decide(s, name: str, args: dict, kind: str) -> str:
     return "approve"
 
 
-def check(s, name: str, args: dict, kind: str, diff: str | None = None) -> str | None:
+def check(s, name: str, args: dict, kind: str) -> str | None:
     """Returns an 'error: ...' string when the call must not run, else None."""
     decision = decide(s, name, args, kind)
     if decision == "reject":
         return "error: rejected by safety policy"
-    if decision == "ask" and not tui.confirm(name, args, diff):
+    if decision == "ask" and not tui.confirm(name, args):
         return "error: rejected by user"
     return None

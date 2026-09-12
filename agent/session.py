@@ -9,13 +9,12 @@ from hooks.hook_system import HookSystem
 from tools import discovery
 from tools.builtin import memory
 from tools.mcp import mcp_manager
-from tools.registry import create_default_registry
+from tools import registry
 
 
 class Session:
     def __init__(self, config: Config):
         self.config = config
-        self.tool_registry = create_default_registry(config)
         self.context_manager: ContextManager | None = None
         self.mcp: dict = {}  # server name -> MCPClient
         self.chat_compactor = ChatCompactor(config)
@@ -36,7 +35,7 @@ class Session:
         self.context_manager = ContextManager(
             config=self.config,
             user_memory=self._load_memory(),
-            tools=self.tool_registry.get_tools(),
+            tools=[registry.info(n) for n in registry.names(self)],
         )
 
     def _load_memory(self) -> str | None:
@@ -56,6 +55,6 @@ class Session:
             "turn_count": self.turn_count,
             "message_count": self.context_manager.message_count,
             "token_usage": self.context_manager.total_usage,
-            "tools_count": len(self.tool_registry.get_tools()),
+            "tools_count": len(registry.names(self)),
             "mcp_servers": sum(1 for c in self.mcp.values() if c.status == "connected"),
         }

@@ -129,14 +129,7 @@ class Agent:
                     async def invoke_tool(
                         name: str, call_id: str, args: dict
                     ) -> tuple[str, str, ToolResult]:
-                        result = await self.session.tool_registry.invoke(
-                            name,
-                            args,
-                            self.config.cwd,
-                            self.session.hook_system,
-                            self.session.approval_manager,
-                            self.session.undo_manager,
-                        )
+                        result = await self.session.tool_registry.invoke(self.session, name, args)
                         return (name, call_id, result)
 
                     semaphore = asyncio.Semaphore(self.config.max_parallel_tools)
@@ -172,14 +165,7 @@ class Agent:
                         args=tool_call["arguments"],
                     )
 
-                    result = await self.session.tool_registry.invoke(
-                        tool_call["name"],
-                        tool_call["arguments"],
-                        self.config.cwd,
-                        self.session.hook_system,
-                        self.session.approval_manager,
-                        self.session.undo_manager,
-                    )
+                    result = await self.session.tool_registry.invoke(self.session, tool_call["name"], tool_call["arguments"])
 
                     yield AgentEvent.tool_call_complete(
                         tool_call["id"],

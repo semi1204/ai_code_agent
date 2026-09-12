@@ -87,5 +87,5 @@ class Session:
             "message_count": self.context_manager.message_count,
             "token_usage": self.context_manager.total_usage,
             "tools_count": len(self.tool_registry.get_tools()),
-            "mcp_servers": len(self.tool_registry.connected_mcp_servers),
+            "mcp_servers": sum(1 for srv in self.mcp_manager.get_all_servers() if srv["status"] == "connected"),
         }

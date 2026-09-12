@@ -1,161 +1,95 @@
-from pathlib import Path
-from typing import TYPE_CHECKING, Any
-from config.config import Config
-from hooks.hook_system import HookSystem
-from safety.approval import ApprovalContext, ApprovalDecision, ApprovalManager
-from tools.base import Tool, ToolInvocation, ToolResult
-import logging
-from tools.builtin import ReadFileTool, get_all_builtin_tools
+"""Looks tools up by name and runs them through approval and hooks."""
+
+from types import SimpleNamespace
+
+from safety.approval import ApprovalContext, ApprovalDecision
+from tools.base import MUTATING, TOOLS, Tool, ToolConfirmation, ToolInvocation, ToolKind, ToolResult, make_schema, run_tool
+from tools.builtin import get_all_builtin_tools
 from tools.subagents import SubagentTool, get_default_subagent_definitions
-
-if TYPE_CHECKING:
-    from agent.undo import UndoManager
-
-logger = logging.getLogger(__name__)
+from utils.paths import resolve_path
 
 
 class ToolRegistry:
-    def __init__(self, config: Config):
-        self._tools: dict[str, Tool] = {}
-        self._mcp_tools: dict[str, Tool] = {}
+    def __init__(self, config):
         self.config = config
-
-    @property
-    def connected_mcp_servers(self) -> list[Tool]:
-        return self._mcp_tools.values()
+        self._tools: dict[str, Tool] = {}  # legacy class-based tools; function tools live in TOOLS
 
     def register(self, tool: Tool) -> None:
-        if tool.name in self._tools:
-            logger.warning(f"Overwriting existing tool: {tool.name}")
-
         self._tools[tool.name] = tool
-        logger.debug(f"Registered tool: {tool.name}")
 
-    def register_mcp_tool(self, tool: Tool) -> None:
-        self._mcp_tools[tool.name] = tool
-        logger.debug(f"Registered MCP tool: {tool.name}")
+    register_mcp_tool = register
 
-    def unregister(self, name: str) -> bool:
-        if name in self._tools:
-            del self._tools[name]
-            return True
+    def names(self) -> list[str]:
+        names = list(self._tools) + [n for n in TOOLS if n not in self._tools]
+        if self.config.allowed_tools:
+            names = [n for n in names if n in self.config.allowed_tools]
+        return names
 
-        return False
-
-    def get(self, name: str) -> Tool | None:
+    def get(self, name: str):
         if name in self._tools:
             return self._tools[name]
-        elif name in self._mcp_tools:
-            return self._mcp_tools[name]
-
+        if name in TOOLS:
+            description, _, _, kind = TOOLS[name]
+            return SimpleNamespace(name=name, description=description, kind=ToolKind(kind))
         return None
 
-    def get_tools(self) -> list[Tool]:
-        tools: list[Tool] = []
+    def get_tools(self) -> list:
+        return [self.get(n) for n in self.names()]
 
-        for tool in self._tools.values():
-            tools.append(tool)
+    def get_schemas(self) -> list[dict]:
+        return [self._tools[n].to_openai_schema() if n in self._tools else make_schema(n) for n in self.names()]
 
-        for mcp_tool in self._mcp_tools.values():
-            tools.append(mcp_tool)
-
-        if self.config.allowed_tools:
-            allowed_set = set(self.config.allowed_tools)
-            tools = [t for t in tools if t.name in allowed_set]
-
-        return tools
-
-    def get_schemas(self) -> list[dict[str, Any]]:
-        return [tool.to_openai_schema() for tool in self.get_tools()]
-
-    async def invoke(
-        self,
-        name: str,
-        params: dict[str, Any],
-        cwd: Path,
-        hook_system: HookSystem,
-        approval_manager: ApprovalManager | None = None,
-        undo_manager: "UndoManager | None" = None,
-    ) -> ToolResult:
-        tool = self.get(name)
-        if tool is None:
-            result = ToolResult.error_result(
-                f"Unknown tool: {name}",
-                metadata={"tool_name": name},
-            )
-            await hook_system.trigger_after_tool(name, params, result)
-            return result
-
-        validation_errors = tool.validate_params(params)
-        if validation_errors:
-            result = ToolResult.error_result(
-                f"Invalid parameters: {'; '.join(validation_errors)}",
-                metadata={
-                    "tool_name": name,
-                    "validation_errors": validation_errors,
-                },
-            )
-
-            await hook_system.trigger_after_tool(name, params, result)
-
-            return result
-
-        await hook_system.trigger_before_tool(name, params)
-        invocation = ToolInvocation(
-            params=params,
-            cwd=cwd,
-            undo_manager=undo_manager,
-        )
-        if approval_manager:
-            confirmation = await tool.get_confirmation(invocation)
-            if confirmation:
-                context = ApprovalContext(
-                    tool_name=name,
-                    params=params,
-                    is_mutating=tool.is_mutating(params),
-                    affected_paths=confirmation.affected_paths,
-                    command=confirmation.command,
-                    is_dangerous=confirmation.is_dangerous,
-                )
-
-                decision = await approval_manager.check_approval(context)
-                if decision == ApprovalDecision.REJECTED:
-                    result = ToolResult.error_result(
-                        "Operation rejected by safety policy"
-                    )
-                    await hook_system.trigger_after_tool(name, params, result)
-                    return result
-                elif decision == ApprovalDecision.NEEDS_CONFIRMATION:
-                    approved = approval_manager.request_confirmation(confirmation)
-
-                    if not approved:
-                        result = ToolResult.error_result("User rejected the operation")
-                        await hook_system.trigger_after_tool(name, params, result)
-                        return result
-
-        try:
-            result = await tool.execute(invocation)
-        except Exception as e:
-            logger.exception(f"Tool {name} raised unexpected error")
-            result = ToolResult.error_result(
-                f"Internal error: {str(e)}",
-                metadata={
-                    "tool_name",
-                    name,
-                },
-            )
-
-        await hook_system.trigger_after_tool(name, params, result)
+    async def invoke(self, s, name: str, params: dict) -> ToolResult:
+        if name not in self.names():
+            result = ToolResult.error_result(f"Unknown tool: {name}")
+        else:
+            await s.hook_system.trigger_before_tool(name, params)
+            result = await (self._invoke_class(s, name, params) if name in self._tools else self._invoke_function(s, name, params))
+        await s.hook_system.trigger_after_tool(name, params, result)
         return result
 
+    async def _invoke_class(self, s, name: str, params: dict) -> ToolResult:
+        tool = self._tools[name]
+        errors = tool.validate_params(params)
+        if errors:
+            return ToolResult.error_result(f"Invalid parameters: {'; '.join(errors)}")
+        invocation = ToolInvocation(params=params, cwd=s.config.cwd, undo_manager=s.undo_manager)
+        confirmation = await tool.get_confirmation(invocation)
+        if confirmation:
+            context = ApprovalContext(
+                name, params, tool.is_mutating(params), confirmation.affected_paths, confirmation.command, confirmation.is_dangerous
+            )
+            if rejected := await self._approve(s, context, confirmation):
+                return rejected
+        try:
+            return await tool.execute(invocation)
+        except Exception as e:
+            return ToolResult.error_result(f"Internal error: {e}")
 
-def create_default_registry(config: Config) -> ToolRegistry:
+    async def _invoke_function(self, s, name: str, params: dict) -> ToolResult:
+        if TOOLS[name][3] in MUTATING:
+            paths = [resolve_path(s.config.cwd, params["path"])] if "path" in params else []
+            confirmation = ToolConfirmation(name, params, f"Execute {name}", affected_paths=paths, command=params.get("command"))
+            if rejected := await self._approve(s, ApprovalContext(name, params, True, paths, confirmation.command), confirmation):
+                return rejected
+        output = await run_tool(name, params, s)
+        if output.startswith("error:"):
+            return ToolResult(success=False, output=output, error=output)
+        return ToolResult.success_result(output)
+
+    async def _approve(self, s, context: ApprovalContext, confirmation: ToolConfirmation) -> ToolResult | None:
+        decision = await s.approval_manager.check_approval(context)
+        if decision == ApprovalDecision.REJECTED:
+            return ToolResult.error_result("Operation rejected by safety policy")
+        if decision == ApprovalDecision.NEEDS_CONFIRMATION and not s.approval_manager.request_confirmation(confirmation):
+            return ToolResult.error_result("User rejected the operation")
+        return None
+
+
+def create_default_registry(config) -> ToolRegistry:
     registry = ToolRegistry(config)
-
     for tool_class in get_all_builtin_tools():
         registry.register(tool_class(config))
-
-    for subagent_def in get_default_subagent_definitions():
-        registry.register(SubagentTool(config, subagent_def))
-
+    for definition in get_default_subagent_definitions():
+        registry.register(SubagentTool(config, definition))
     return registry

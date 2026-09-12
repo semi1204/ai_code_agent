@@ -91,7 +91,7 @@ class CLI:
         tui.show_help(COMMANDS)
 
     async def cmd_clear(self, args):
-        self.agent.session.context_manager.clear()
+        self.agent.session.messages.clear()
         self.agent.session.history.clear()
         print(f"{GREEN}Conversation cleared{RESET}")
 
@@ -143,7 +143,7 @@ class CLI:
     def snapshot(self) -> SessionSnapshot:
         s = self.agent.session
         return SessionSnapshot(
-            s.session_id, s.created_at, s.updated_at, s.turn_count, s.context_manager.get_messages(), s.context_manager.total_usage
+            s.session_id, s.created_at, s.updated_at, s.turn_count, s.messages, s.usage
         )
 
     async def restore(self, snap: SessionSnapshot) -> None:
@@ -152,15 +152,8 @@ class CLI:
         session.session_id, session.created_at, session.updated_at, session.turn_count = (
             snap.session_id, snap.created_at, snap.updated_at, snap.turn_count
         )
-        cm = session.context_manager
-        cm.total_usage = snap.total_usage
-        for m in snap.messages:
-            if m["role"] == "user":
-                cm.add_user_message(m.get("content", ""))
-            elif m["role"] == "assistant":
-                cm.add_assistant_message(m.get("content", ""), m.get("tool_calls"))
-            elif m["role"] == "tool":
-                cm.add_tool_result(m.get("tool_call_id", ""), m.get("content", ""))
+        session.usage = snap.total_usage
+        session.messages = [m for m in snap.messages if m["role"] != "system"]
         await mcp_manager.shutdown(self.agent.session)
         self.agent.session = session
 

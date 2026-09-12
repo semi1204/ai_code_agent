@@ -4,7 +4,7 @@ from typing import AsyncGenerator
 from agent.events import AgentEvent, AgentEventType
 from agent import undo
 from agent.session import Session
-from context import loop_detector
+from context import compaction, loop_detector, manager
 from hooks.hook_system import run_hooks
 from tools.mcp import mcp_manager
 import json
@@ -24,7 +24,7 @@ class Agent:
     async def run(self, message: str):
         await run_hooks(self.session, "before_agent", user_message=message)
         yield AgentEvent.agent_start(message)
-        self.session.context_manager.add_user_message(message)
+        manager.add_user(self.session, message)
 
         final_response: str | None = None
 
@@ -45,15 +45,8 @@ class Agent:
             response_text = ""
 
             # check for context overflow
-            if self.session.context_manager.needs_compression():
-                summary, usage = await self.session.chat_compactor.compress(
-                    self.session.context_manager
-                )
-
-                if summary:
-                    self.session.context_manager.replace_with_summary(summary)
-                    self.session.context_manager.set_latest_usage(usage)
-                    self.session.context_manager.add_usage(usage)
+            if manager.needs_compaction(self.session):
+                await compaction.compact(self.session)
 
             tool_schemas = registry.schemas(self.session)
 
@@ -62,7 +55,7 @@ class Agent:
 
             async for kind, payload in chat(
                 self.config,
-                self.session.context_manager.get_messages(),
+                manager.messages_for_api(self.session),
                 tools=tool_schemas or None,
             ):
                 if kind == "text":
@@ -76,7 +69,8 @@ class Agent:
                 elif kind == "usage":
                     usage = payload
 
-            self.session.context_manager.add_assistant_message(
+            manager.add_assistant(
+                self.session,
                 response_text or None,
                 (
                     [
@@ -100,10 +94,8 @@ class Agent:
 
             if not tool_calls:
                 if usage:
-                    self.session.context_manager.set_latest_usage(usage)
-                    self.session.context_manager.add_usage(usage)
-
-                self.session.context_manager.prune_tool_outputs()
+                    manager.add_usage(self.session, usage)
+                manager.prune_tool_outputs(self.session)
                 return
 
             tool_call_results: list[tuple[str, str]] = []
@@ -169,18 +161,16 @@ class Agent:
                     )
 
             for call_id, content in tool_call_results:
-                self.session.context_manager.add_tool_result(call_id, content)
+                manager.add_tool(self.session, call_id, content)
 
             undo.commit(self.session, f"Turn {self.session.turn_count}: {', '.join(tc['name'] for tc in tool_calls)}")
 
             if found := loop_detector.check(self.session):
-                self.session.context_manager.add_user_message(create_loop_breaker_prompt(found))
+                manager.add_user(self.session, create_loop_breaker_prompt(found))
 
             if usage:
-                self.session.context_manager.set_latest_usage(usage)
-                self.session.context_manager.add_usage(usage)
-
-            self.session.context_manager.prune_tool_outputs()
+                manager.add_usage(self.session, usage)
+            manager.prune_tool_outputs(self.session)
         await run_hooks(self.session, "on_error", error=f"Maximum turns ({max_turns}) reached")
         yield AgentEvent.agent_error(f"Maximum turns ({max_turns}) reached")
 

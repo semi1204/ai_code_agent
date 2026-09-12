@@ -2,11 +2,10 @@
 
 from types import SimpleNamespace
 
-from safety.approval import ApprovalContext, ApprovalDecision
-from tools.base import MUTATING, TOOLS, Tool, ToolConfirmation, ToolInvocation, ToolKind, ToolResult, make_schema, run_tool
+from safety import approval
+from tools.base import TOOLS, Tool, ToolInvocation, ToolKind, ToolResult, make_schema, run_tool
 from tools.builtin import get_all_builtin_tools
 from tools.subagents import SubagentTool, get_default_subagent_definitions
-from utils.paths import resolve_path
 
 
 class ToolRegistry:
@@ -56,34 +55,23 @@ class ToolRegistry:
         invocation = ToolInvocation(params=params, cwd=s.config.cwd, session=s)
         confirmation = await tool.get_confirmation(invocation)
         if confirmation:
-            context = ApprovalContext(
-                name, params, tool.is_mutating(params), confirmation.affected_paths, confirmation.command, confirmation.is_dangerous
-            )
-            if rejected := await self._approve(s, context, confirmation):
-                return rejected
+            diff = confirmation.diff.to_diff() if confirmation.diff else None
+            if error := approval.check(s, name, params, tool.kind.value, diff):
+                return _fail(error)
         try:
             return await tool.execute(invocation)
         except Exception as e:
             return ToolResult.error_result(f"Internal error: {e}")
 
     async def _invoke_function(self, s, name: str, params: dict) -> ToolResult:
-        if TOOLS[name][3] in MUTATING:
-            paths = [resolve_path(s.config.cwd, params["path"])] if "path" in params else []
-            confirmation = ToolConfirmation(name, params, f"Execute {name}", affected_paths=paths, command=params.get("command"))
-            if rejected := await self._approve(s, ApprovalContext(name, params, True, paths, confirmation.command), confirmation):
-                return rejected
+        if error := approval.check(s, name, params, TOOLS[name][3]):
+            return _fail(error)
         output = await run_tool(name, params, s)
-        if output.startswith("error:"):
-            return ToolResult(success=False, output=output, error=output)
-        return ToolResult.success_result(output)
+        return _fail(output) if output.startswith("error:") else ToolResult.success_result(output)
 
-    async def _approve(self, s, context: ApprovalContext, confirmation: ToolConfirmation) -> ToolResult | None:
-        decision = await s.approval_manager.check_approval(context)
-        if decision == ApprovalDecision.REJECTED:
-            return ToolResult.error_result("Operation rejected by safety policy")
-        if decision == ApprovalDecision.NEEDS_CONFIRMATION and not s.approval_manager.request_confirmation(confirmation):
-            return ToolResult.error_result("User rejected the operation")
-        return None
+
+def _fail(message: str) -> ToolResult:
+    return ToolResult(success=False, output=message, error=message)
 
 
 def create_default_registry(config) -> ToolRegistry:

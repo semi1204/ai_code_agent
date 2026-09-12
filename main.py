@@ -27,7 +27,7 @@ class CLI:
 
     async def run_interactive(self) -> None:
         tui.welcome(self.config)
-        async with Agent(self.config, confirmation_callback=tui.confirm) as agent:
+        async with Agent(self.config) as agent:
             self.agent = agent
             while True:
                 try:

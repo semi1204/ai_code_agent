@@ -1,6 +1,6 @@
 from __future__ import annotations
 import asyncio
-from typing import AsyncGenerator, Awaitable, Callable
+from typing import AsyncGenerator
 from agent.events import AgentEvent, AgentEventType
 from agent import undo
 from agent.session import Session
@@ -8,19 +8,14 @@ import json
 from client.llm_client import chat
 from config.config import Config
 from prompts.system import create_loop_breaker_prompt
-from tools.base import ToolConfirmation, ToolResult
+from tools.base import ToolResult
 from tools.parallel import DependencyAnalyzer
 
 
 class Agent:
-    def __init__(
-        self,
-        config: Config,
-        confirmation_callback: Callable[[ToolConfirmation], bool] | None = None,
-    ):
+    def __init__(self, config: Config):
         self.config = config
         self.session: Session | None = Session(self.config)
-        self.session.approval_manager.confirmation_callback = confirmation_callback
         self._dependency_analyzer = DependencyAnalyzer()
 
     async def run(self, message: str):

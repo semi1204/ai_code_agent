@@ -1,27 +1,10 @@
-from dataclasses import dataclass
-from enum import Enum
-from pathlib import Path
+"""Decides whether a tool call may run under the session's approval policy."""
+
 import re
-from typing import Any, Awaitable, Callable
-from tools.base import ToolConfirmation
 
-
-class ApprovalDecision(str, Enum):
-    APPROVED = "approved"
-    REJECTED = "rejected"
-    NEEDS_CONFIRMATION = "needs_confirmation"
-
-
-@dataclass
-class ApprovalContext:
-
-    tool_name: str
-    params: dict[str, Any]
-    is_mutating: bool
-    affected_paths: list[Path]
-    command: str | None = None
-    is_dangerous: bool = False
-
+from tools.base import MUTATING
+from ui import tui
+from utils.paths import resolve_path
 
 DANGEROUS_PATTERNS = [
     # File system destruction
@@ -52,7 +35,7 @@ DANGEROUS_PATTERNS = [
     r":\(\)\s*\{\s*:\|:&\s*\}\s*;",
 ]
 
-# Patterns for safe commands (can be auto-approved)
+# Patterns for safe commands (auto-approved)
 SAFE_PATTERNS = [
     # Information commands
     r"^(ls|dir|pwd|cd|echo|cat|head|tail|less|more|wc)(\s|$)",
@@ -72,85 +55,35 @@ SAFE_PATTERNS = [
 ]
 
 
-def is_dangerous_command(command: str) -> bool:
-    for pattern in DANGEROUS_PATTERNS:
-        if re.search(pattern, command, re.IGNORECASE):
-            return True
-
-    return False
+def _matches(patterns: list[str], command: str) -> bool:
+    return any(re.search(p, command, re.IGNORECASE) for p in patterns)
 
 
-def is_safe_command(command: str) -> bool:
-    for pattern in SAFE_PATTERNS:
-        if re.search(pattern, command, re.IGNORECASE):
-            return True
+def decide(s, name: str, args: dict, kind: str) -> str:
+    """'approve' | 'reject' | 'ask'. The policy is read live, so /approval applies at once."""
+    policy = s.config.approval
+    if kind not in MUTATING or policy == "yolo":
+        return "approve"
+    if kind == "shell":
+        command = str(args.get("command", ""))
+        if _matches(DANGEROUS_PATTERNS, command):
+            return "reject"
+        if _matches(SAFE_PATTERNS, command) or policy in ("auto", "on-failure"):
+            return "approve"
+        return "reject" if policy == "never" else "ask"
+    path = resolve_path(s.config.cwd, args["path"]) if args.get("path") else None
+    if path and not path.is_relative_to(s.config.cwd):
+        return "ask"  # touches a file outside the working directory
+    if name == "write_file" and path and path.exists():
+        return "ask"  # overwrites an existing file
+    return "approve"
 
-    return False
 
-
-class ApprovalManager:
-    def __init__(
-        self,
-        approval_policy: str,
-        cwd: Path,
-        confirmation_callback: Callable[[ToolConfirmation], bool] | None = None,
-    ) -> None:
-        self.approval_policy = approval_policy
-        self.cwd = cwd
-        self.confirmation_callback = confirmation_callback
-
-    def _assess_command_safety(self, command: str) -> ApprovalDecision:
-        if self.approval_policy == "yolo":
-            return ApprovalDecision.APPROVED
-
-        if is_dangerous_command(command):
-            return ApprovalDecision.REJECTED
-
-        if self.approval_policy == "never":
-            if is_safe_command(command):
-                return ApprovalDecision.APPROVED
-            return ApprovalDecision.REJECTED
-
-        if self.approval_policy in {"auto", "on-failure"}:
-            return ApprovalDecision.APPROVED
-
-        if self.approval_policy == "auto-edit":
-            if is_safe_command(command):
-                return ApprovalDecision.APPROVED
-
-            return ApprovalDecision.NEEDS_CONFIRMATION
-
-        if is_safe_command(command):
-            return ApprovalDecision.APPROVED
-
-        return ApprovalDecision.NEEDS_CONFIRMATION
-
-    async def check_approval(self, context: ApprovalContext) -> ApprovalDecision:
-        if not context.is_mutating:
-            return ApprovalDecision.APPROVED
-
-        if context.command:
-            decision = self._assess_command_safety(context.command)
-            if decision != ApprovalDecision.NEEDS_CONFIRMATION:
-                return decision
-
-        for path in context.affected_paths:
-            path_decision = ApprovalDecision.NEEDS_CONFIRMATION
-            if path.is_relative_to(self.cwd):
-                path_decision = ApprovalDecision.APPROVED
-            else:
-                return path_decision
-
-        if context.is_dangerous:
-            if self.approval_policy == "yolo":
-                return ApprovalDecision.APPROVED
-            return ApprovalDecision.NEEDS_CONFIRMATION
-
-        return ApprovalDecision.APPROVED
-
-    def request_confirmation(self, confirmation: ToolConfirmation) -> bool:
-        if self.confirmation_callback:
-            result = self.confirmation_callback(confirmation)
-            return result
-
-        return True
+def check(s, name: str, args: dict, kind: str, diff: str | None = None) -> str | None:
+    """Returns an 'error: ...' string when the call must not run, else None."""
+    decision = decide(s, name, args, kind)
+    if decision == "reject":
+        return "error: rejected by safety policy"
+    if decision == "ask" and not tui.confirm(name, args, diff):
+        return "error: rejected by user"
+    return None

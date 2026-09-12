@@ -129,7 +129,7 @@ An `AGENTS.md` in the working directory is added to the system prompt as project
 | shell: dangerous (`rm -rf /`, `shutdown`, `curl … \| sh` …) | reject | reject | reject |
 | network, MCP | ask | approve | reject |
 
-Tests: `python -m unittest discover -s tests`.
+Tests: `python -m unittest discover -s tests`. Set `AI_AGENT_DEBUG=1` to print tracebacks of tool failures.
 
 ## Commands
 

@@ -11,7 +11,7 @@ MAX_OUTPUT_TOKENS = 25_000
 @tool(
     "read_file",
     "Read a text file with line numbers. Use offset (1-based line) and limit for large files. Cannot read binary files.",
-    {"path": "string", "offset": "number?", "limit": "number?"},
+    {"path": "string", "offset": "integer?", "limit": "integer?"},
 )
 def read_file(args, s):
     path = resolve_path(s.config.cwd, args["path"])

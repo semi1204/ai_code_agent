@@ -2,19 +2,20 @@
 
 A tool is `def fn(args: dict, s) -> str` (sync or async), registered with
 `@tool(name, description, params, kind)`. `params` is the compact schema
-{"path": "string", "limit": "number?"} (trailing ? = optional) or a full JSON
-schema object. Failures come back as "error: ..." strings, never exceptions.
+{"path": "string", "limit": "integer?"} (JSON schema type names, trailing ? = optional)
+or a full JSON schema object. Failures come back as "error: ..." strings, never exceptions.
 
 """
 
 import asyncio
 import inspect
+import os
+import traceback
 from typing import Callable
 
 KINDS = ("read", "write", "shell", "network", "memory", "mcp")
 MUTATING = {"write", "shell", "network", "memory", "mcp"}
 TOOLS: dict[str, tuple[str, dict, Callable, str]] = {}  # name -> (description, params, fn, kind)
-JSON_TYPES = {"number": "integer"}  # compact type -> JSON schema type
 
 
 def tool(name: str, description: str, params: dict, kind: str = "read"):
@@ -32,7 +33,7 @@ def make_schema(name: str) -> dict:
     properties, required = {}, []
     for pname, ptype in params.items():
         base = ptype.rstrip("?")
-        properties[pname] = {"type": JSON_TYPES.get(base, base)}
+        properties[pname] = {"type": base}
         if not ptype.endswith("?"):
             required.append(pname)
     return {"name": name, "description": description, "parameters": {"type": "object", "properties": properties, "required": required}}
@@ -47,4 +48,6 @@ async def run_tool(name: str, args: dict, s) -> str:
     try:  # sync tools run in a worker thread so read-only batches really overlap
         return await (fn(args, s) if inspect.iscoroutinefunction(fn) else asyncio.to_thread(fn, args, s))
     except Exception as e:
+        if os.environ.get("AI_AGENT_DEBUG"):
+            traceback.print_exc()
         return f"error: {e}"

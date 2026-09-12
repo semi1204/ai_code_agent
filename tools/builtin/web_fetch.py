@@ -12,7 +12,7 @@ USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36
 @tool(
     "web_fetch",
     "Fetch an http(s) URL and return the response body as text (redirects followed, 100KB cap).",
-    {"url": "string", "timeout": "number?"},
+    {"url": "string", "timeout": "integer?"},
     kind="network",
 )
 def web_fetch(args, s):

@@ -18,7 +18,7 @@ MAX_OUTPUT = 100 * 1024
 @tool(
     "shell",
     "Run a shell command in the working directory (or cwd). Output is streamed; timeout defaults to 120s (max 600).",
-    {"command": "string", "timeout": "number?", "cwd": "string?"},
+    {"command": "string", "timeout": "integer?", "cwd": "string?"},
     kind="shell",
 )
 async def shell(args, s):

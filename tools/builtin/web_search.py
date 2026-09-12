@@ -47,7 +47,7 @@ def _ddg_search(query: str, max_results: int = 10) -> list[dict]:
 @tool(
     "web_search",
     "Search the web (DuckDuckGo); returns numbered results with title, URL and snippet.",
-    {"query": "string", "max_results": "number?"},
+    {"query": "string", "max_results": "integer?"},
     kind="network",
 )
 def web_search(args, s):

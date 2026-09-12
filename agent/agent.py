@@ -41,7 +41,7 @@ async def run(s: Session, message: str):
     for _ in range(s.config.max_turns):
         s.turns += 1
         s.updated_at = datetime.now()
-        text, calls, usage = "", [], None
+        text, calls, usage, failed = "", [], None, False
         async for kind, payload in chat(s.config, manager.messages_for_api(s), tools=registry.schemas(s) or None):
             if kind == "text":
                 text += payload
@@ -51,8 +51,11 @@ async def run(s: Session, message: str):
             elif kind == "usage":
                 usage = payload
             elif kind == "error":
+                failed = True
                 await run_hooks(s, "on_error", error=payload)
                 yield ("error", payload)
+        if failed:
+            break  # record nothing for this turn; the user can retry
         tool_calls = [{"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": json.dumps(c["arguments"])}} for c in calls]
         manager.add_assistant(s, text or None, tool_calls or None)
         if usage:

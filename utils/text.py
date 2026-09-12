@@ -1,5 +1,6 @@
 def count_tokens(text: str) -> int:
-    return max(1, len(text) // 4)
+    """Rough estimate: ~4 ASCII chars per token; CJK text is 3 bytes/char, so it counts ~0.75 token per char."""
+    return max(1, len(text.encode("utf-8")) // 4)
 
 
 def truncate_text(text: str, max_tokens: int, suffix: str = "\n... [truncated]") -> str:

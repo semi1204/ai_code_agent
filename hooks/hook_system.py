@@ -67,7 +67,7 @@ class HookSystem:
         error: Exception | None = None,
     ) -> dict[str, str]:
         env = os.environ.copy()
-        env["AI_AGENT_TRIGGER"] = trigger.value
+        env["AI_AGENT_TRIGGER"] = trigger
         env["AI_AGENT_CWD"] = str(self.config.cwd)
 
         if tool_name:

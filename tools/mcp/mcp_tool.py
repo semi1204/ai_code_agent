@@ -1,8 +1,7 @@
 from typing import Any
 from config.config import Config
 from tools.base import Tool, ToolInvocation, ToolKind, ToolResult
-from tools.mcp.client import MCPClient, MCPToolInfo
-from utils.paths import resolve_path
+from tools.mcp.client import MCPClient
 
 
 class MCPTool(Tool):
@@ -11,18 +10,18 @@ class MCPTool(Tool):
         self,
         config: Config,
         client: MCPClient,
-        tool_info: MCPToolInfo,
+        tool_info: dict,
         name: str,
     ) -> None:
         super().__init__(config)
         self._tool_info = tool_info
         self._client = client
         self.name = name
-        self.description = self._tool_info.description
+        self.description = self._tool_info["description"]
 
     @property
     def schema(self) -> dict[str, Any]:
-        input_schema = self._tool_info.input_schema or {}
+        input_schema = self._tool_info["input_schema"] or {}
         return {
             "type": "object",
             "properties": input_schema.get("properties", {}),
@@ -36,16 +35,9 @@ class MCPTool(Tool):
 
     async def execute(self, invocation: ToolInvocation) -> ToolResult:
         try:
-            result = await self._client.call_tool(
-                self._tool_info.name,
-                invocation.params,
-            )
-            output = result.get("output", "")
-            is_error = result.get("is_error", False)
-
-            if is_error:
+            output = await self._client.call_tool(self._tool_info["name"], invocation.params)
+            if output.startswith("error:"):
                 return ToolResult.error_result(output)
-
             return ToolResult.success_result(output)
         except Exception as e:
             return ToolResult.error_result(f"MCP tool failed: {e}")

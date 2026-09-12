@@ -1,7 +1,7 @@
 import asyncio
 from typing import Any
 from config.config import Config
-from tools.mcp.client import MCPClient, MCPServerStatus
+from tools.mcp.client import MCPClient
 from tools.mcp.mcp_tool import MCPTool
 from tools.registry import ToolRegistry
 
@@ -47,7 +47,7 @@ class MCPManager:
         count = 0
 
         for client in self._clients.values():
-            if client.status != MCPServerStatus.CONNECTED:
+            if client.status != "connected":
                 continue
 
             for tool_info in client.tools:
@@ -75,7 +75,7 @@ class MCPManager:
         for name, client in self._clients.items():
             server_info = {
                 "name": name,
-                "status": client.status.value,
+                "status": client.status,
                 "tools": len(client.tools),
             }
             servers.append(server_info)

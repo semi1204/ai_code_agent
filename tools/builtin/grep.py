@@ -1,117 +1,54 @@
+"""grep: regex search over files."""
+
 import os
-from pathlib import Path
 import re
-from tools.base import Tool, ToolInvocation, ToolKind, ToolResult
-from pydantic import BaseModel, Field
+from pathlib import Path
 
-from utils.paths import is_binary_file, resolve_path
+from tools.base import tool
+from utils.paths import display_path_rel_to_cwd, is_binary_file, resolve_path
+from utils.text import truncate_text
 
-
-class GrepParams(BaseModel):
-    pattern: str = Field(..., description="Regular expression pattern to search for")
-    path: str = Field(
-        ".", description="File or directory to search in (default: current directory)"
-    )
-    case_insensitive: bool = Field(
-        False,
-        description="Case-insensitive search (default: false)",
-    )
+IGNORED_DIRS = {"node_modules", "__pycache__", ".git", ".venv", "venv"}
+MAX_FILES = 500
+MAX_OUTPUT_TOKENS = 25_000
 
 
-class GrepTool(Tool):
-    name = "grep"
-    description = "Search for a regex pattern in file contents. Returns matching lines with file paths and line numbers."
-    kind = ToolKind.READ
-    schema = GrepParams
-
-    async def execute(self, invocation: ToolInvocation) -> ToolResult:
-        params = GrepParams(**invocation.params)
-
-        search_path = resolve_path(invocation.cwd, params.path)
-
-        if not search_path.exists():
-            return ToolResult.error_result(f"Path does not exist: {search_path}")
-
+@tool(
+    "grep",
+    "Search files for a regex; returns file:line:text. path may be a file or directory (default: working directory).",
+    {"pattern": "string", "path": "string?", "case_insensitive": "boolean?"},
+)
+def grep(args, s):
+    root = resolve_path(s.config.cwd, args.get("path") or ".")
+    if not root.exists():
+        return f"error: path does not exist: {root}"
+    try:
+        pattern = re.compile(args["pattern"], re.IGNORECASE if args.get("case_insensitive") else 0)
+    except re.error as e:
+        return f"error: invalid regex: {e}"
+    files = [root] if root.is_file() else _walk(root)
+    hits = []
+    for path in files:
         try:
-            flags = re.IGNORECASE if params.case_insensitive else 0
-            pattern = re.compile(params.pattern, flags)
-        except re.error as e:
-            return ToolResult.error_result(f"Invalid regex pattern: {e}")
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            continue
+        shown = display_path_rel_to_cwd(str(path), s.config.cwd)
+        hits += [f"{shown}:{i}:{line}" for i, line in enumerate(lines, 1) if pattern.search(line)]
+    if not hits:
+        return f"No matches for '{args['pattern']}' ({len(files)} files searched)"
+    return truncate_text("\n".join(hits), MAX_OUTPUT_TOKENS, "\n... [truncated]")
 
-        if search_path.is_dir():
-            files = self._find_files(search_path)
-        else:
-            files = [search_path]
 
-        output_lines = []
-        matches = 0
-
-        for file_path in files:
-            try:
-                content = file_path.read_text(encoding="utf-8")
-            except Exception:
-                continue
-
-            lines = content.splitlines()
-            file_matches = False
-
-            # === path.py ===
-            # 1: async def execute()
-            # 30: async def execute()
-
-            # === path2.py ===
-            # 1: async def execute()
-            # 30: async def execute()
-            for i, line in enumerate(lines, start=1):
-                if pattern.search(line):
-                    matches += 1
-                    if not file_matches:
-                        rel_path = file_path.relative_to(invocation.cwd)
-                        output_lines.append(f"=== {rel_path} ===")
-                        file_matches = True
-
-                    output_lines.append(f"{i}:{line}")
-
-            if file_matches:
-                output_lines.append("")
-
-        if not output_lines:
-            return ToolResult.success_result(
-                f"No matches found for pattern '{params.pattern}'",
-                metadata={
-                    "path": str(search_path),
-                    "matches": 0,
-                    "files_searched": len(files),
-                },
-            )
-
-        return ToolResult.success_result(
-            "\n".join(output_lines),
-            metadata={
-                "path": str(search_path),
-                "matches": matches,
-                "files_searched": len(files),
-            },
-        )
-
-    def _find_files(self, search_path: Path) -> list[Path]:
-        files = []
-
-        for root, dirs, filenames in os.walk(search_path):
-            dirs[:] = [
-                d
-                for d in dirs
-                if d not in {"node_modules", "__pycache__", ".git", ".venv", "venv"}
-            ]
-
-            for filename in filenames:
-                if filename.startswith("."):
-                    continue
-
-                file_path = Path(root) / filename
-                if not is_binary_file(file_path):
-                    files.append(file_path)
-                    if len(files) >= 500:
-                        return files
-
-        return files
+def _walk(root: Path) -> list[Path]:
+    """Text files under root, skipping hidden files, IGNORED_DIRS and binaries; at most MAX_FILES."""
+    files = []
+    for dirpath, dirs, names in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in IGNORED_DIRS]
+        for name in names:
+            path = Path(dirpath) / name
+            if not name.startswith(".") and not is_binary_file(path):
+                files.append(path)
+                if len(files) >= MAX_FILES:
+                    return files
+    return files

@@ -1,13 +1,14 @@
+"""CLI entry point: `python main.py "prompt"` for one shot, no argument for the REPL."""
+
 import asyncio
-from pathlib import Path
 import sys
-import click
+from pathlib import Path
 
 from agent.agent import Agent
 from agent.events import AgentEventType
 from agent.persistence import PersistenceManager, SessionSnapshot
 from agent.session import Session
-from config.config import APPROVAL_POLICIES, Config
+from config.config import APPROVAL_POLICIES
 from config.loader import load_config
 from ui.tui import TUI, get_console
 
@@ -15,347 +16,257 @@ console = get_console()
 
 
 class CLI:
-    def __init__(self, config: Config):
-        self.agent: Agent | None = None
+    def __init__(self, config):
         self.config = config
         self.tui = TUI(config, console)
+        self.agent = None
 
     async def run_single(self, message: str) -> str | None:
         async with Agent(self.config) as agent:
             self.agent = agent
-            return await self._process_message(message)
+            return await self.process(message)
 
-    async def run_interactive(self) -> str | None:
+    async def run_interactive(self) -> None:
         self.tui.print_welcome(
             "AI Agent",
-            lines=[
-                f"model: {self.config.model_name}",
-                f"cwd: {self.config.cwd}",
-                "commands: /help /config /approval /model /exit",
-            ],
+            lines=[f"model: {self.config.model_name}", f"cwd: {self.config.cwd}", "commands: /help /config /approval /model /exit"],
         )
-
-        async with Agent(
-            self.config,
-            confirmation_callback=self.tui.handle_confirmation,
-        ) as agent:
+        async with Agent(self.config, confirmation_callback=self.tui.handle_confirmation) as agent:
             self.agent = agent
-
             while True:
                 try:
-                    user_input = console.input("\n[user]>[/user] ").strip()
-                    if not user_input:
-                        continue
-
-                    if user_input.startswith("/"):
-                        should_continue = await self._handle_command(user_input)
-                        if not should_continue:
-                            break
-                        continue
-
-                    await self._process_message(user_input)
-                except KeyboardInterrupt:
-                    console.print("\n[dim]Use /exit to quit[/dim]")
+                    line = console.input("\n[user]>[/user] ").strip()
                 except EOFError:
                     break
-
+                except KeyboardInterrupt:
+                    console.print("\n[dim]Use /exit to quit[/dim]")
+                    continue
+                if not line:
+                    continue
+                if line.startswith("/"):
+                    if await self.command(line) is False:
+                        break
+                else:
+                    await self.process(line)
         console.print("\n[dim]Goodbye![/dim]")
 
-    def _get_tool_kind(self, tool_name: str) -> str | None:
-        tool_kind = None
-        tool = self.agent.session.tool_registry.get(tool_name)
-        if not tool:
-            tool_kind = None
+    def tool_kind(self, name: str) -> str | None:
+        tool = self.agent.session.tool_registry.get(name)
+        return tool.kind.value if tool else None
 
-        tool_kind = tool.kind.value
-
-        return tool_kind
-
-    async def _process_message(self, message: str) -> str | None:
-        if not self.agent:
-            return None
-
-        assistant_streaming = False
-        final_response: str | None = None
-
+    async def process(self, message: str) -> str | None:
+        streaming, final = False, None
         async for event in self.agent.run(message):
+            d = event.data
             if event.type == AgentEventType.TEXT_DELTA:
-                content = event.data.get("content", "")
-                if not assistant_streaming:
+                if not streaming:
                     self.tui.begin_assistant()
-                    assistant_streaming = True
-                self.tui.stream_assistant_delta(content)
+                    streaming = True
+                self.tui.stream_assistant_delta(d.get("content", ""))
             elif event.type == AgentEventType.TEXT_COMPLETE:
-                final_response = event.data.get("content")
-                if assistant_streaming:
+                final = d.get("content")
+                if streaming:
                     self.tui.end_assistant()
-                    assistant_streaming = False
+                    streaming = False
             elif event.type == AgentEventType.AGENT_ERROR:
-                error = event.data.get("error", "Unknown error")
-                console.print(f"\n[error]Error: {error}[/error]")
+                console.print(f"\n[error]Error: {d.get('error', 'Unknown error')}[/error]")
             elif event.type == AgentEventType.TOOL_CALL_START:
-                tool_name = event.data.get("name", "unknown")
-                tool_kind = self._get_tool_kind(tool_name)
-                self.tui.tool_call_start(
-                    event.data.get("call_id", ""),
-                    tool_name,
-                    tool_kind,
-                    event.data.get("arguments", {}),
-                )
+                self.tui.tool_call_start(d.get("call_id", ""), d["name"], self.tool_kind(d["name"]), d.get("arguments", {}))
             elif event.type == AgentEventType.TOOL_CALL_COMPLETE:
-                tool_name = event.data.get("name", "unknown")
-                tool_kind = self._get_tool_kind(tool_name)
                 self.tui.tool_call_complete(
-                    event.data.get("call_id", ""),
-                    tool_name,
-                    tool_kind,
-                    event.data.get("success", False),
-                    event.data.get("output", ""),
-                    event.data.get("error"),
-                    event.data.get("metadata"),
-                    event.data.get("diff"),
-                    event.data.get("truncated", False),
-                    event.data.get("exit_code"),
+                    d.get("call_id", ""), d["name"], self.tool_kind(d["name"]), d.get("success", False), d.get("output", ""),
+                    d.get("error"), d.get("metadata"), d.get("diff"), d.get("truncated", False), d.get("exit_code"),
                 )
+        return final
 
-        return final_response
+    # --- slash commands: each takes the argument string; returning False quits ---
 
-    async def _handle_command(self, command: str) -> bool:
-        cmd = command.lower().strip()
-        parts = cmd.split(maxsplit=1)
-        cmd_name = parts[0]
-        cmd_args = parts[1] if len(parts) > 1 else ""
-        if cmd_name == "/exit" or cmd_name == "/quit":
-            return False
-        elif command == "/help":
-            self.tui.show_help()
-        elif command == "/clear":
-            self.agent.session.context_manager.clear()
-            self.agent.session.loop_detector.clear()
-            console.print("[success]Conversation cleared [/success]")
-        elif command == "/config":
-            console.print("\n[bold]Current Configuration[/bold]")
-            console.print(f"  Model: {self.config.model_name}")
-            console.print(f"  Temperature: {self.config.temperature}")
-            console.print(f"  Approval: {self.config.approval}")
-            console.print(f"  Working Dir: {self.config.cwd}")
-            console.print(f"  Max Turns: {self.config.max_turns}")
-            console.print(f"  Hooks Enabled: {self.config.hooks_enabled}")
-        elif cmd_name == "/model":
-            if cmd_args:
-                self.config.model_name = cmd_args
-                console.print(f"[success]Model changed to: {cmd_args} [/success]")
-            else:
-                console.print(f"Current model: {self.config.model_name}")
-        elif cmd_name == "/approval":
-            if cmd_args:
-                if cmd_args in APPROVAL_POLICIES:
-                    self.config.approval = cmd_args
-                    console.print(f"[success]Approval policy changed to: {cmd_args} [/success]")
-                else:
-                    console.print(f"[error]Incorrect approval policy: {cmd_args} [/error]")
-                    console.print(f"Valid options: {', '.join(APPROVAL_POLICIES)}")
-            else:
-                console.print(f"Current approval policy: {self.config.approval}")
-        elif cmd_name == "/stats":
-            stats = self.agent.session.get_stats()
-            console.print("\n[bold]Session Statistics [/bold]")
-            for key, value in stats.items():
-                console.print(f"   {key}: {value}")
-        elif cmd_name == "/tools":
-            tools = self.agent.session.tool_registry.get_tools()
-            console.print(f"\n[bold]Available tools ({len(tools)}) [/bold]")
-            for tool in tools:
-                console.print(f"  • {tool.name}")
-        elif cmd_name == "/mcp":
-            mcp_servers = self.agent.session.mcp_manager.get_all_servers()
-            console.print(f"\n[bold]MCP Servers ({len(mcp_servers)}) [/bold]")
-            for server in mcp_servers:
-                status = server["status"]
-                status_color = "green" if status == "connected" else "red"
-                console.print(
-                    f"  • {server['name']}: [{status_color}]{status}[/{status_color}] ({server['tools']} tools)"
-                )
-        elif cmd_name == "/save":
-            persistence_manager = PersistenceManager()
-            session_snapshot = SessionSnapshot(
-                session_id=self.agent.session.session_id,
-                created_at=self.agent.session.created_at,
-                updated_at=self.agent.session.updated_at,
-                turn_count=self.agent.session.turn_count,
-                messages=self.agent.session.context_manager.get_messages(),
-                total_usage=self.agent.session.context_manager.total_usage,
-            )
-            persistence_manager.save_session(session_snapshot)
-            console.print(
-                f"[success]Session saved: {self.agent.session.session_id}[/success]"
-            )
-        elif cmd_name == "/sessions":
-            persistence_manager = PersistenceManager()
-            sessions = persistence_manager.list_sessions()
-            console.print("\n[bold]Saved Sessions[/bold]")
-            for s in sessions:
-                console.print(
-                    f"  • {s['session_id']} (turns: {s['turn_count']}, updated: {s['updated_at']})"
-                )
-        elif cmd_name == "/resume":
-            if not cmd_args:
-                console.print(f"[error]Usage: /resume <session_id> [/error]")
-            else:
-                persistence_manager = PersistenceManager()
-                snapshot = persistence_manager.load_session(cmd_args)
-                if not snapshot:
-                    console.print(f"[error]Session does not exist [/error]")
-                else:
-                    session = Session(
-                        config=self.config,
-                    )
-                    await session.initialize()
-                    session.session_id = snapshot.session_id
-                    session.created_at = snapshot.created_at
-                    session.updated_at = snapshot.updated_at
-                    session.turn_count = snapshot.turn_count
-                    session.context_manager.total_usage = snapshot.total_usage
+    async def command(self, line: str):
+        name, _, args = line.partition(" ")
+        handler = COMMANDS.get(name.lower())
+        if not handler:
+            console.print(f"[error]Unknown command: {name}[/error]")
+            return True
+        return await handler(self, args.strip())
 
-                    for msg in snapshot.messages:
-                        if msg.get("role") == "system":
-                            continue
-                        elif msg["role"] == "user":
-                            session.context_manager.add_user_message(
-                                msg.get("content", "")
-                            )
-                        elif msg["role"] == "assistant":
-                            session.context_manager.add_assistant_message(
-                                msg.get("content", ""), msg.get("tool_calls")
-                            )
-                        elif msg["role"] == "tool":
-                            session.context_manager.add_tool_result(
-                                msg.get("tool_call_id", ""), msg.get("content", "")
-                            )
-                    await self.agent.session.mcp_manager.shutdown()
+    async def cmd_quit(self, args):
+        return False
 
-                    self.agent.session = session
-                    console.print(
-                        f"[success]Resumed session: {session.session_id}[/success]"
-                    )
-        elif cmd_name == "/checkpoint":
-            persistence_manager = PersistenceManager()
-            session_snapshot = SessionSnapshot(
-                session_id=self.agent.session.session_id,
-                created_at=self.agent.session.created_at,
-                updated_at=self.agent.session.updated_at,
-                turn_count=self.agent.session.turn_count,
-                messages=self.agent.session.context_manager.get_messages(),
-                total_usage=self.agent.session.context_manager.total_usage,
-            )
-            checkpoint_id = persistence_manager.save_checkpoint(session_snapshot)
-            console.print(f"[success]Checkpoint created: {checkpoint_id}[/success]")
-        elif cmd_name == "/restore":
-            if not cmd_args:
-                console.print(f"[error]Usage: /restire <checkpoint_id> [/error]")
-            else:
-                persistence_manager = PersistenceManager()
-                snapshot = persistence_manager.load_checkpoint(cmd_args)
-                if not snapshot:
-                    console.print(f"[error]Checkpoint does not exist [/error]")
-                else:
-                    session = Session(
-                        config=self.config,
-                    )
-                    await session.initialize()
-                    session.session_id = snapshot.session_id
-                    session.created_at = snapshot.created_at
-                    session.updated_at = snapshot.updated_at
-                    session.turn_count = snapshot.turn_count
-                    session.context_manager.total_usage = snapshot.total_usage
+    async def cmd_help(self, args):
+        self.tui.show_help()
 
-                    for msg in snapshot.messages:
-                        if msg.get("role") == "system":
-                            continue
-                        elif msg["role"] == "user":
-                            session.context_manager.add_user_message(
-                                msg.get("content", "")
-                            )
-                        elif msg["role"] == "assistant":
-                            session.context_manager.add_assistant_message(
-                                msg.get("content", ""), msg.get("tool_calls")
-                            )
-                        elif msg["role"] == "tool":
-                            session.context_manager.add_tool_result(
-                                msg.get("tool_call_id", ""), msg.get("content", "")
-                            )
-                    await self.agent.session.mcp_manager.shutdown()
+    async def cmd_clear(self, args):
+        self.agent.session.context_manager.clear()
+        self.agent.session.loop_detector.clear()
+        console.print("[success]Conversation cleared[/success]")
 
-                    self.agent.session = session
-                    console.print(
-                        f"[success]Resumed session: {session.session_id}, checkpoint: {checkpoint_id}[/success]"
-                    )
-        elif cmd_name == "/undo":
-            count = 1
-            if cmd_args:
-                try:
-                    count = int(cmd_args)
-                except ValueError:
-                    console.print("[error]Usage: /undo [count][/error]")
-                    return True
+    async def cmd_config(self, args):
+        c = self.config
+        console.print("\n[bold]Current Configuration[/bold]")
+        for key, value in [
+            ("Model", c.model_name), ("Temperature", c.temperature), ("Approval", c.approval),
+            ("Working Dir", c.cwd), ("Max Turns", c.max_turns), ("Hooks Enabled", c.hooks_enabled),
+        ]:
+            console.print(f"  {key}: {value}")
 
-            undone = self.agent.session.undo_manager.undo(count)
-            if not undone:
-                console.print("[warning]Nothing to undo[/warning]")
-            else:
-                for entry in undone:
-                    console.print(f"[success]Undone: {entry.description}[/success]")
-                    for change in entry.changes:
-                        action = "Deleted" if change.is_new_file else "Restored"
-                        console.print(f"  - {action}: {change.path}")
-        elif cmd_name == "/history":
-            history = self.agent.session.undo_manager.get_history()
-            if not history:
-                console.print("[dim]No undo history[/dim]")
-            else:
-                console.print("\n[bold]Undo History[/bold]")
-                for entry in history:
-                    status = "[dim](undone)[/dim]" if entry.is_undone else ""
-                    file_count = len(entry.changes)
-                    console.print(
-                        f"  {entry.entry_id} - {entry.description} ({file_count} file(s)) {status}"
-                    )
+    async def cmd_model(self, args):
+        if args:
+            self.config.model_name = args
+            console.print(f"[success]Model changed to: {args}[/success]")
         else:
-            console.print(f"[error]Unknown command: {cmd_name}[/error]")
+            console.print(f"Current model: {self.config.model_name}")
 
-        return True
+    async def cmd_approval(self, args):
+        if not args:
+            console.print(f"Current approval policy: {self.config.approval}")
+        elif args in APPROVAL_POLICIES:
+            self.config.approval = args
+            console.print(f"[success]Approval policy changed to: {args}[/success]")
+        else:
+            console.print(f"[error]Unknown approval policy: {args}. Valid: {', '.join(APPROVAL_POLICIES)}[/error]")
+
+    async def cmd_stats(self, args):
+        console.print("\n[bold]Session Statistics[/bold]")
+        for key, value in self.agent.session.get_stats().items():
+            console.print(f"   {key}: {value}")
+
+    async def cmd_tools(self, args):
+        tools = self.agent.session.tool_registry.get_tools()
+        console.print(f"\n[bold]Available tools ({len(tools)})[/bold]")
+        for tool in tools:
+            console.print(f"  • {tool.name}")
+
+    async def cmd_mcp(self, args):
+        servers = self.agent.session.mcp_manager.get_all_servers()
+        console.print(f"\n[bold]MCP Servers ({len(servers)})[/bold]")
+        for s in servers:
+            color = "green" if s["status"] == "connected" else "red"
+            console.print(f"  • {s['name']}: [{color}]{s['status']}[/{color}] ({s['tools']} tools)")
+
+    # sessions and checkpoints share one snapshot/restore path
+
+    def snapshot(self) -> SessionSnapshot:
+        s = self.agent.session
+        return SessionSnapshot(
+            s.session_id, s.created_at, s.updated_at, s.turn_count, s.context_manager.get_messages(), s.context_manager.total_usage
+        )
+
+    async def restore(self, snap: SessionSnapshot) -> None:
+        session = Session(self.config)
+        await session.initialize()
+        session.session_id, session.created_at, session.updated_at, session.turn_count = (
+            snap.session_id, snap.created_at, snap.updated_at, snap.turn_count
+        )
+        cm = session.context_manager
+        cm.total_usage = snap.total_usage
+        for m in snap.messages:
+            if m["role"] == "user":
+                cm.add_user_message(m.get("content", ""))
+            elif m["role"] == "assistant":
+                cm.add_assistant_message(m.get("content", ""), m.get("tool_calls"))
+            elif m["role"] == "tool":
+                cm.add_tool_result(m.get("tool_call_id", ""), m.get("content", ""))
+        await self.agent.session.mcp_manager.shutdown()
+        self.agent.session = session
+
+    async def cmd_save(self, args):
+        PersistenceManager().save_session(self.snapshot())
+        console.print(f"[success]Session saved: {self.agent.session.session_id}[/success]")
+
+    async def cmd_sessions(self, args):
+        console.print("\n[bold]Saved Sessions[/bold]")
+        for s in PersistenceManager().list_sessions():
+            console.print(f"  • {s['session_id']} (turns: {s['turn_count']}, updated: {s['updated_at']})")
+
+    async def cmd_resume(self, args):
+        snap = PersistenceManager().load_session(args) if args else None
+        if not snap:
+            console.print("[error]Usage: /resume <session_id> (see /sessions)[/error]")
+            return
+        await self.restore(snap)
+        console.print(f"[success]Resumed session: {snap.session_id}[/success]")
+
+    async def cmd_checkpoint(self, args):
+        checkpoint_id = PersistenceManager().save_checkpoint(self.snapshot())
+        console.print(f"[success]Checkpoint created: {checkpoint_id}[/success]")
+
+    async def cmd_checkpoints(self, args):
+        console.print("\n[bold]Checkpoints[/bold]")
+        for path in sorted(PersistenceManager().checkpoints_dir.glob("*.json"), reverse=True):
+            console.print(f"  • {path.stem}")
+
+    async def cmd_restore(self, args):
+        snap = PersistenceManager().load_checkpoint(args) if args else None
+        if not snap:
+            console.print("[error]Usage: /restore <checkpoint_id> (see /checkpoints)[/error]")
+            return
+        await self.restore(snap)
+        console.print(f"[success]Restored checkpoint: {args}[/success]")
+
+    async def cmd_undo(self, args):
+        try:
+            count = int(args or 1)
+        except ValueError:
+            console.print("[error]Usage: /undo [count][/error]")
+            return
+        undone = self.agent.session.undo_manager.undo(count)
+        if not undone:
+            console.print("[warning]Nothing to undo[/warning]")
+        for entry in undone:
+            console.print(f"[success]Undone: {entry.description}[/success]")
+            for change in entry.changes:
+                console.print(f"  - {'Deleted' if change.is_new_file else 'Restored'}: {change.path}")
+
+    async def cmd_history(self, args):
+        history = self.agent.session.undo_manager.get_history()
+        if not history:
+            console.print("[dim]No undo history[/dim]")
+            return
+        console.print("\n[bold]Undo History[/bold]")
+        for e in history:
+            console.print(f"  {e.entry_id} - {e.description} ({len(e.changes)} file(s)) {'[dim](undone)[/dim]' if e.is_undone else ''}")
 
 
-@click.command()
-@click.argument("prompt", required=False)
-@click.option(
-    "--cwd",
-    "-c",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-    help="Current working directory",
-)
-def main(
-    prompt: str | None,
-    cwd: Path | None,
-):
+COMMANDS = {
+    "/help": CLI.cmd_help,
+    "/exit": CLI.cmd_quit, "/quit": CLI.cmd_quit, "/q": CLI.cmd_quit,
+    "/clear": CLI.cmd_clear, "/c": CLI.cmd_clear,
+    "/config": CLI.cmd_config,
+    "/model": CLI.cmd_model,
+    "/approval": CLI.cmd_approval,
+    "/stats": CLI.cmd_stats,
+    "/tools": CLI.cmd_tools,
+    "/mcp": CLI.cmd_mcp,
+    "/save": CLI.cmd_save, "/sessions": CLI.cmd_sessions, "/resume": CLI.cmd_resume,
+    "/checkpoint": CLI.cmd_checkpoint, "/checkpoints": CLI.cmd_checkpoints, "/restore": CLI.cmd_restore,
+    "/undo": CLI.cmd_undo, "/history": CLI.cmd_history,
+}
+
+
+def main(argv: list[str]) -> None:
+    args = list(argv)
+    cwd = None
+    for flag in ("--cwd", "-c"):
+        if flag in args:
+            i = args.index(flag)
+            cwd = Path(args[i + 1])
+            del args[i : i + 2]
+    prompt = " ".join(args)
+
     config = load_config(cwd=cwd)
     errors = config.validate()
-
+    for error in errors:
+        console.print(f"[error]{error}[/error]")
     if errors:
-        for error in errors:
-            console.print(f"[error]{error}[/error]")
-
         sys.exit(1)
 
     cli = CLI(config)
-
-    # messages = [{"role": "user", "content": prompt}]
     if prompt:
-        result = asyncio.run(cli.run_single(prompt))
-        if result is None:
+        if asyncio.run(cli.run_single(prompt)) is None:
             sys.exit(1)
     else:
         asyncio.run(cli.run_interactive())
 
 
-main()
+if __name__ == "__main__":
+    main(sys.argv[1:])

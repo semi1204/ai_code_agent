@@ -3,6 +3,7 @@
 import asyncio
 import dataclasses
 import textwrap
+from collections import deque
 
 from tools.base import tool
 
@@ -29,10 +30,14 @@ SUBAGENTS = {
 def _register(name: str, spec: dict) -> None:
     @tool(f"subagent_{name}", spec["description"], {"goal": "string"})
     async def run_subagent(args, s):
-        from agent.agent import Agent  # lazy: agent imports the tool registry
-        from agent.events import AgentEventType
+        from agent import agent  # lazy: agent imports the tool registry
+        from prompts.system import get_system_prompt
+        from tools import registry
 
         config = dataclasses.replace(s.config, max_turns=spec["max_turns"], allowed_tools=spec["tools"])
+        # a fresh conversation that shares the parent's MCP connections, undo history and usage totals
+        sub = dataclasses.replace(s, config=config, messages=[], last_usage={}, todos={}, pending=[], history=deque(maxlen=20), turns=0)
+        sub.system_prompt = get_system_prompt(config, None, [registry.info(n) for n in registry.names(sub)])
         prompt = textwrap.dedent(f"""\
             You are a specialized sub-agent with a specific task to complete.
 
@@ -44,18 +49,18 @@ def _register(name: str, spec: dict) -> None:
             Focus only on this task, then give a concise final answer.""")
         tools_used, final, error = [], None, None
         deadline = asyncio.get_running_loop().time() + spec["timeout"]  # checked between events
-        async with Agent(config) as agent:
-            async for event in agent.run(prompt):
-                if asyncio.get_running_loop().time() > deadline:
-                    error = f"timed out after {spec['timeout']}s"
-                    break
-                if event.type == AgentEventType.TOOL_CALL_START:
-                    tools_used.append(event.data["name"])
-                elif event.type == AgentEventType.TEXT_COMPLETE:
-                    final = event.data.get("content")
-                elif event.type == AgentEventType.AGENT_ERROR:
-                    error = event.data.get("error", "unknown error")
-                    break
+        async for event in agent.run(sub, prompt):
+            if asyncio.get_running_loop().time() > deadline:
+                error = f"timed out after {spec['timeout']}s"
+                break
+            if event[0] == "tool_start":
+                tools_used.append(event[1])
+                final = None
+            elif event[0] == "text":
+                final = (final or "") + event[1]
+            elif event[0] == "error":
+                error = event[1]
+                break
         summary = f"Sub-agent '{name}' used: {', '.join(tools_used) or 'no tools'}\n\n{final or 'No response'}"
         return f"error: {error}\n{summary}" if error else summary
 

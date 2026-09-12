@@ -133,6 +133,13 @@ An `AGENTS.md` in the working directory is added to the system prompt as project
 | `/undo [N]` | Undo the last N turns of file changes |
 | `/history` | Undo history |
 
+## Prompt suggestions
+
+After each answer the agent asks the model, in the background, what you are likely to type next and shows it dimly
+above the prompt. Press `Tab` to fill it in, then `Enter` to send; typing something else just ignores it. The request
+reuses the conversation prefix (so the provider's prompt cache applies) and is skipped after an error turn.
+Set `suggestions = false` in config to turn it off.
+
 ## Adding a Tool
 
 A tool is a function taking the arguments dict and the session, returning a string (`"error: ..."` on failure).

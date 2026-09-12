@@ -1,7 +1,15 @@
 """Terminal output with ANSI escapes — no UI library."""
 
 import os
+import shutil
 import sys
+import threading
+import unicodedata
+
+try:
+    import readline
+except ImportError:  # e.g. Windows: no Tab completion, the hint is still shown
+    readline = None
 
 from utils.paths import display_path_rel_to_cwd
 from utils.text import truncate_text
@@ -91,3 +99,57 @@ def show_help(commands: dict) -> None:
     for name, (_, description) in commands.items():
         print(f"  {CYAN}{name:<14}{RESET}{description}")
     print(f"\n{DIM}Type a message to chat. The agent can read, write and run code; some actions ask for approval.{RESET}")
+
+
+# --- input line, with an optional background prompt suggestion (Tab fills it in) ---
+
+PROMPT = "\n\001" + BOLD + BLUE + "\002❯\001" + RESET + "\002 "  # \001..\002 hide the escapes from readline's cursor math
+
+
+def read_line(fetch=None) -> str:
+    """Prompt for a line. `fetch` runs in a background thread and may return a suggested prompt: it is drawn
+    dimly on the blank line above the prompt, and Tab completes it (when the typed text is a prefix of it)."""
+    state = {"suggestion": None, "done": False}
+
+    def typed() -> str:
+        buffer = readline.get_line_buffer() if readline else ""
+        return "" if "\n" in buffer else buffer  # libedit keeps the previous line (newline included) until new input arrives
+
+    def completer(text, index):
+        suggestion, current = state["suggestion"], typed()
+        return text + suggestion[len(current):] if index == 0 and suggestion and suggestion.startswith(current) else None
+
+    def worker():
+        try:
+            suggestion = fetch()
+        except Exception as e:
+            print(f"warning: prompt suggestion failed: {e}", file=sys.stderr)
+            return
+        if state["done"] or not suggestion or not suggestion.startswith(typed()):
+            return
+        state["suggestion"] = suggestion
+        sys.stdout.write(f"\0337\033[A\r  {DIM}⇥ {_fit(suggestion, shutil.get_terminal_size().columns - 5)}{RESET}\0338")
+        sys.stdout.flush()
+
+    if readline:
+        readline.set_completer(completer)
+        readline.set_completer_delims("")
+        libedit = getattr(readline, "backend", "") == "editline" or "libedit" in (readline.__doc__ or "")
+        readline.parse_and_bind("bind ^I rl_complete" if libedit else "tab: complete")
+    if fetch:
+        threading.Thread(target=worker, daemon=True).start()
+    try:
+        return input(PROMPT)
+    finally:
+        state["done"] = True
+
+
+def _fit(text: str, columns: int) -> str:
+    """Cut text so its display width (CJK counts double) fits in columns."""
+    out, width = "", 0
+    for ch in text:
+        width += 2 if unicodedata.east_asian_width(ch) in "WF" else 1
+        if width > columns:
+            return out + "…"
+        out += ch
+    return out

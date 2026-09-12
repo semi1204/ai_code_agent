@@ -66,6 +66,7 @@ class Config:
     user_instructions: str | None = None
     parallel_tools: bool = True
     max_parallel_tools: int = 5
+    suggestions: bool = True  # suggest the next prompt after each answer; Tab fills it in
 
     def __post_init__(self):
         if self.approval not in APPROVAL_POLICIES:

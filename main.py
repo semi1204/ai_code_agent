@@ -4,19 +4,20 @@ import asyncio
 import sys
 from pathlib import Path
 
-from agent import agent, persistence, undo
+from agent import agent, persistence, suggest, undo
 from config.config import APPROVAL_POLICIES
 from config.loader import load_config
 from tools import registry
 from tools.mcp import mcp_manager
 from ui import tui
-from ui.tui import BLUE, BOLD, DIM, GREEN, RED, RESET, YELLOW
+from ui.tui import BOLD, DIM, GREEN, RED, RESET, YELLOW
 
 
 class CLI:
     def __init__(self, config):
         self.config = config
         self.session = None
+        self.last_error = False  # a suggestion is skipped after a turn that ended in an error
 
     async def run_single(self, message: str) -> str | None:
         self.session = await agent.start(self.config)
@@ -31,7 +32,7 @@ class CLI:
         try:
             while True:
                 try:
-                    line = input(f"\n{BOLD}{BLUE}❯{RESET} ").strip()
+                    line = tui.read_line(self.suggester()).strip()
                 except EOFError:
                     break
                 except KeyboardInterrupt:
@@ -48,12 +49,19 @@ class CLI:
             await agent.close(self.session)
         print(f"\n{DIM}Goodbye!{RESET}")
 
+    def suggester(self):
+        """Background fetch for the next-prompt suggestion, or None when one should not be made."""
+        if not self.config.suggestions or not self.session.messages or self.last_error:
+            return None
+        return lambda: asyncio.run(suggest.suggest(self.session))
+
     def tool_kind(self, name: str) -> str | None:
         tool = registry.info(name)
         return tool.kind if tool else None
 
     async def process(self, message: str) -> str | None:
         streaming, final = False, None
+        self.last_error = False
         async for event in agent.run(self.session, message):
             if streaming and event[0] != "text":
                 tui.end_text()
@@ -69,6 +77,7 @@ class CLI:
             elif event[0] == "tool_end":
                 tui.tool_end(event[1], event[2])
             elif event[0] == "error":
+                self.last_error = True
                 print(f"\n{RED}⏺ Error: {event[1]}{RESET}")
         if streaming:
             tui.end_text()
@@ -100,7 +109,7 @@ class CLI:
         print(f"\n{BOLD}Current Configuration{RESET}")
         for key, value in [
             ("Model", c.model_name), ("Temperature", c.temperature), ("Approval", c.approval),
-            ("Working Dir", c.cwd), ("Max Turns", c.max_turns), ("Hooks Enabled", c.hooks_enabled),
+            ("Working Dir", c.cwd), ("Max Turns", c.max_turns), ("Hooks Enabled", c.hooks_enabled), ("Suggestions", c.suggestions),
         ]:
             print(f"  {key}: {value}")
 

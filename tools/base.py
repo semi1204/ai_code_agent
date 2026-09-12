@@ -145,7 +145,7 @@ class ToolResult:
 class ToolInvocation:
     params: dict[str, Any]
     cwd: Path
-    undo_manager: Any = None
+    session: Any = None
 
 
 @dataclass

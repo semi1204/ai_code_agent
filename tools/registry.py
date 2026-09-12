@@ -53,7 +53,7 @@ class ToolRegistry:
         errors = tool.validate_params(params)
         if errors:
             return ToolResult.error_result(f"Invalid parameters: {'; '.join(errors)}")
-        invocation = ToolInvocation(params=params, cwd=s.config.cwd, undo_manager=s.undo_manager)
+        invocation = ToolInvocation(params=params, cwd=s.config.cwd, session=s)
         confirmation = await tool.get_confirmation(invocation)
         if confirmation:
             context = ApprovalContext(

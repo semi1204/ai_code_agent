@@ -2,7 +2,6 @@ from datetime import datetime
 import json
 from typing import Any
 import uuid
-from agent.undo import UndoManager
 from config.config import Config
 from config.loader import DATA_DIR
 from context.compaction import ChatCompactor
@@ -35,7 +34,8 @@ class Session:
         self.session_id = str(uuid.uuid4())
         self.created_at = datetime.now()
         self.updated_at = datetime.now()
-        self.undo_manager = UndoManager(self.session_id)
+        self.undo: list[dict] = []  # committed undo entries
+        self.pending: list[tuple] = []  # (path, old_content) snapshots for the current turn
 
         self.turn_count = 0
 

@@ -1,3 +1,4 @@
+from agent import undo
 from tools.base import (
     FileDiff,
     Tool,
@@ -87,6 +88,8 @@ class WriteFileTool(Tool):
                     f"Parent directory does not exist: {path.parent}"
                 )
 
+            undo.record(invocation.session, path)
+
             path.write_text(params.content, encoding="utf-8")
 
             action = "Created" if is_new_file else "Updated"
@@ -97,9 +100,6 @@ class WriteFileTool(Tool):
                 new_content=params.content,
                 is_new_file=is_new_file,
             )
-
-            if invocation.undo_manager:
-                invocation.undo_manager.record_change(diff)
 
             return ToolResult.success_result(
                 f"{action} {path} {line_count} lines",

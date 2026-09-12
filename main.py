@@ -4,6 +4,7 @@ import asyncio
 import sys
 from pathlib import Path
 
+from agent import undo
 from agent.agent import Agent
 from agent.events import AgentEventType
 from agent.persistence import PersistenceManager, SessionSnapshot
@@ -201,22 +202,22 @@ class CLI:
         except ValueError:
             print(f"{RED}Usage: /undo [count]{RESET}")
             return
-        undone = self.agent.session.undo_manager.undo(count)
+        undone = undo.undo(self.agent.session, count)
         if not undone:
             print(f"{YELLOW}Nothing to undo{RESET}")
         for entry in undone:
-            print(f"{GREEN}Undone: {entry.description}{RESET}")
-            for change in entry.changes:
-                print(f"  - {'Deleted' if change.is_new_file else 'Restored'}: {change.path}")
+            print(f"{GREEN}Undone: {entry['description']}{RESET}")
+            for path, old in entry["changes"]:
+                print(f"  - {'Deleted' if old is None else 'Restored'}: {path}")
 
     async def cmd_history(self, args):
-        history = self.agent.session.undo_manager.get_history()
+        history = undo.history(self.agent.session)
         if not history:
             print(f"{DIM}No undo history{RESET}")
             return
         print(f"\n{BOLD}Undo History{RESET}")
         for e in history:
-            print(f"  {e.entry_id} - {e.description} ({len(e.changes)} file(s)) {DIM + '(undone)' + RESET if e.is_undone else ''}")
+            print(f"  {e['description']} ({len(e['changes'])} file(s)) {DIM + '(undone)' + RESET if e['undone'] else ''}")
 
 
 COMMANDS = {  # name -> (handler, help)

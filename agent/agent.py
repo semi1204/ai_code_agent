@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 from typing import AsyncGenerator, Awaitable, Callable
 from agent.events import AgentEvent, AgentEventType
+from agent import undo
 from agent.session import Session
 import json
 from client.llm_client import chat
@@ -180,11 +181,7 @@ class Agent:
             for call_id, content in tool_call_results:
                 self.session.context_manager.add_tool_result(call_id, content)
 
-            if self.session.undo_manager.has_pending_changes():
-                tool_names = ", ".join(tc["name"] for tc in tool_calls)
-                self.session.undo_manager.commit_entry(
-                    f"Turn {self.session.turn_count}: {tool_names}"
-                )
+            undo.commit(self.session, f"Turn {self.session.turn_count}: {', '.join(tc['name'] for tc in tool_calls)}")
 
             loop_detection_error = self.session.loop_detector.check_for_loop()
             if loop_detection_error:

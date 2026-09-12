@@ -4,8 +4,7 @@ import asyncio
 import sys
 from pathlib import Path
 
-from agent import agent, undo
-from agent.persistence import PersistenceManager, SessionSnapshot
+from agent import agent, persistence, undo
 from config.config import APPROVAL_POLICIES
 from config.loader import load_config
 from tools import registry
@@ -143,50 +142,38 @@ class CLI:
             color = GREEN if s["status"] == "connected" else RED
             print(f"  • {s['name']}: {color}{s['status']}{RESET} ({s['tools']} tools)")
 
-    # sessions and checkpoints share one snapshot/restore path
-
-    def snapshot(self) -> SessionSnapshot:
-        s = self.session
-        return SessionSnapshot(s.id, s.created_at, s.updated_at, s.turns, s.messages, s.usage)
-
-    async def restore(self, snap: SessionSnapshot) -> None:
-        await agent.close(self.session)
-        s = self.session = await agent.start(self.config)
-        s.id, s.created_at, s.updated_at, s.turns, s.usage = snap.session_id, snap.created_at, snap.updated_at, snap.turn_count, snap.total_usage
-        s.messages = [m for m in snap.messages if m["role"] != "system"]
+    # sessions and checkpoints share one save/load path
 
     async def cmd_save(self, args):
-        PersistenceManager().save_session(self.snapshot())
-        print(f"{GREEN}Session saved: {self.session.id}{RESET}")
+        print(f"{GREEN}Session saved: {persistence.save(self.session)}{RESET}")
 
     async def cmd_sessions(self, args):
         print(f"\n{BOLD}Saved Sessions{RESET}")
-        for s in PersistenceManager().list_sessions():
-            print(f"  • {s['session_id']} (turns: {s['turn_count']}, updated: {s['updated_at']})")
+        for item in persistence.saved():
+            print(f"  • {item['name']} (turns: {item['turns']}, updated: {item['updated_at']})")
 
     async def cmd_resume(self, args):
-        snap = PersistenceManager().load_session(args) if args else None
-        if not snap:
+        data = persistence.load(args) if args else None
+        if not data:
             print(f"{RED}Usage: /resume <session_id> (see /sessions){RESET}")
             return
-        await self.restore(snap)
-        print(f"{GREEN}Resumed session: {snap.session_id}{RESET}")
+        persistence.restore(self.session, data)
+        print(f"{GREEN}Resumed session: {args}{RESET}")
 
     async def cmd_checkpoint(self, args):
-        checkpoint_id = PersistenceManager().save_checkpoint(self.snapshot())
-        print(f"{GREEN}Checkpoint created: {checkpoint_id}{RESET}")
+        print(f"{GREEN}Checkpoint created: {persistence.save(self.session, 'checkpoints')}{RESET}")
 
     async def cmd_checkpoints(self, args):
         print(f"\n{BOLD}Checkpoints{RESET}")
-        for path in sorted(PersistenceManager().checkpoints_dir.glob("*.json"), reverse=True):
-            print(f"  • {path.stem}")
+        for item in persistence.saved("checkpoints"):
+            print(f"  • {item['name']} (turns: {item['turns']})")
 
     async def cmd_restore(self, args):
-        snap = PersistenceManager().load_checkpoint(args) if args else None
-        if not snap:
+        data = persistence.load(args, "checkpoints") if args else None
+        if not data:
             print(f"{RED}Usage: /restore <checkpoint_id> (see /checkpoints){RESET}")
             return
-        await self.restore(snap)
+        persistence.restore(self.session, data)
         print(f"{GREEN}Restored checkpoint: {args}{RESET}")
 
     async def cmd_undo(self, args):

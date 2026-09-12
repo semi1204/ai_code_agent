@@ -1,106 +1,50 @@
-from __future__ import annotations
-from dataclasses import dataclass
-from datetime import datetime
+"""Saved sessions and checkpoints: JSON files under ~/.ai-agent/{sessions,checkpoints}/."""
+
 import json
 import os
-from typing import Any
+from datetime import datetime
+
 from config.loader import DATA_DIR
 
 
-@dataclass
-class SessionSnapshot:
-    session_id: str
-    created_at: datetime
-    updated_at: datetime
-    turn_count: int
-    messages: list[dict[str, Any]]
-    total_usage: dict
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "session_id": self.session_id,
-            "created_at": self.created_at.isoformat(),
-            "updated_at": self.updated_at.isoformat(),
-            "turn_count": self.turn_count,
-            "messages": self.messages,
-            "total_usage": self.total_usage,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> SessionSnapshot:
-        return cls(
-            session_id=data["session_id"],
-            created_at=datetime.fromisoformat(data["created_at"]),
-            updated_at=datetime.fromisoformat(data["updated_at"]),
-            turn_count=data["turn_count"],
-            messages=data["messages"],
-            total_usage=data["total_usage"],
-        )
+def save(s, kind: str = "sessions") -> str:
+    """Write the conversation to DATA_DIR/<kind>/<name>.json; returns the name."""
+    name = s.id if kind == "sessions" else f"{s.id}_{datetime.now():%Y%m%d_%H%M%S}"
+    directory = DATA_DIR / kind
+    directory.mkdir(parents=True, exist_ok=True)
+    os.chmod(directory, 0o700)
+    path = directory / f"{name}.json"
+    data = {
+        "id": s.id, "created_at": s.created_at.isoformat(), "updated_at": s.updated_at.isoformat(),
+        "turns": s.turns, "messages": s.messages, "usage": s.usage,
+    }
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.chmod(path, 0o600)
+    return name
 
 
-class PersistenceManager:
-    def __init__(self):
-        self.data_dir = DATA_DIR
-        self.sessions_dir = self.data_dir / "sessions"
-        self.sessions_dir.mkdir(parents=True, exist_ok=True)
-        self.checkpoints_dir = self.data_dir / "checkpoints"
-        self.checkpoints_dir.mkdir(parents=True, exist_ok=True)
-        os.chmod(self.sessions_dir, 0o700)
-        os.chmod(self.checkpoints_dir, 0o700)
+def load(name: str, kind: str = "sessions") -> dict | None:
+    path = DATA_DIR / kind / f"{name}.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
 
-    def save_session(self, snapshot: SessionSnapshot) -> None:
-        file_path = self.sessions_dir / f"{snapshot.session_id}.json"
 
-        with open(file_path, "w", encoding="utf-8") as fp:
-            json.dump(snapshot.to_dict(), fp, indent=2)
+def restore(s, data: dict) -> None:
+    """Replace the conversation in s with a saved one (MCP connections and tools stay)."""
+    s.id, s.turns, s.usage = data["id"], data["turns"], data["usage"]
+    s.created_at, s.updated_at = datetime.fromisoformat(data["created_at"]), datetime.fromisoformat(data["updated_at"])
+    s.messages = [m for m in data["messages"] if m["role"] != "system"]
+    s.undo, s.pending, s.todos, s.last_usage = [], [], {}, {}
+    s.history.clear()
 
-        os.chmod(file_path, 0o600)
 
-    def load_session(self, session_id: str) -> SessionSnapshot | None:
-        file_path = self.sessions_dir / f"{session_id}.json"
-
-        if not file_path.exists():
-            return None
-
-        with open(file_path, "r", encoding="utf-8") as fp:
-            data = json.load(fp)
-
-        return SessionSnapshot.from_dict(data)
-
-    def list_sessions(self) -> list[dict[str, Any]]:
-        sessions = []
-        for file_path in self.sessions_dir.glob("*.json"):
-            with open(file_path, "r", encoding="utf-8") as fp:
-                data = json.load(fp)
-            sessions.append(
-                {
-                    "session_id": data["session_id"],
-                    "created_at": data["created_at"],
-                    "updated_at": data["updated_at"],
-                    "turn_count": data["turn_count"],
-                }
-            )
-
-        sessions.sort(key=lambda x: x["updated_at"], reverse=True)
-        return sessions
-
-    def save_checkpoint(self, snapshot: SessionSnapshot) -> str:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        checkpoint_id = f"{snapshot.session_id}_{timestamp}"
-        file_path = self.checkpoints_dir / f"{checkpoint_id}.json"
-
-        with open(file_path, "w", encoding="utf-8") as fp:
-            json.dump(snapshot.to_dict(), fp, indent=2)
-        os.chmod(file_path, 0o600)
-        return checkpoint_id
-
-    def load_checkpoint(self, checkpoint_id: str) -> SessionSnapshot | None:
-        file_path = self.checkpoints_dir / f"{checkpoint_id}.json"
-
-        if not file_path.exists():
-            return None
-
-        with open(file_path, "r", encoding="utf-8") as fp:
-            data = json.load(fp)
-
-        return SessionSnapshot.from_dict(data)
+def saved(kind: str = "sessions") -> list[dict]:
+    """Headers of the saved files, newest first; unreadable files are skipped."""
+    directory = DATA_DIR / kind
+    items = []
+    for path in directory.glob("*.json") if directory.is_dir() else []:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            items.append({"name": path.stem, "updated_at": data["updated_at"], "turns": data["turns"]})
+        except (OSError, ValueError, KeyError):
+            continue
+    return sorted(items, key=lambda item: item["updated_at"], reverse=True)

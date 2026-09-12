@@ -59,8 +59,7 @@ class ContextManager:
             role="user",
             content=content,
             token_count=count_tokens(
-                content,
-                self._model_name,
+                content
             ),
         )
 
@@ -75,8 +74,7 @@ class ContextManager:
             role="assistant",
             content=content or "",
             token_count=count_tokens(
-                content or "",
-                self._model_name,
+                content or ""
             ),
             tool_calls=tool_calls or [],
         )
@@ -88,7 +86,7 @@ class ContextManager:
             role="tool",
             content=content,
             tool_call_id=tool_call_id,
-            token_count=count_tokens(content, self._model_name),
+            token_count=count_tokens(content),
         )
 
         self._messages.append(item)
@@ -141,7 +139,7 @@ class ContextManager:
         summary_item = MessageItem(
             role="user",
             content=continuation_content,
-            token_count=count_tokens(continuation_content, self._model_name),
+            token_count=count_tokens(continuation_content),
         )
         self._messages.append(summary_item)
 
@@ -155,7 +153,7 @@ I'll continue with the REMAINING tasks only, starting from where we left off."""
         ack_item = MessageItem(
             role="assistant",
             content=ack_content,
-            token_count=count_tokens(ack_content, self._model_name),
+            token_count=count_tokens(ack_content),
         )
         self._messages.append(ack_item)
 
@@ -167,7 +165,7 @@ I'll continue with the REMAINING tasks only, starting from where we left off."""
         continue_item = MessageItem(
             role="user",
             content=continue_content,
-            token_count=count_tokens(continue_content, self._model_name),
+            token_count=count_tokens(continue_content),
         )
         self._messages.append(continue_item)
 
@@ -186,7 +184,7 @@ I'll continue with the REMAINING tasks only, starting from where we left off."""
                 if msg.pruned_at:
                     break
 
-                tokens = msg.token_count or count_tokens(msg.content, self._model_name)
+                tokens = msg.token_count or count_tokens(msg.content)
                 total_tokens += tokens
 
                 if total_tokens > self.PRUNE_PROTECT_TOKENS:
@@ -200,7 +198,7 @@ I'll continue with the REMAINING tasks only, starting from where we left off."""
 
         for msg in to_prune:
             msg.content = "[Old tool result content cleared]"
-            msg.token_count = count_tokens(msg.content, self._model_name)
+            msg.token_count = count_tokens(msg.content)
             msg.pruned_at = datetime.now()
             pruned_count += 1
 

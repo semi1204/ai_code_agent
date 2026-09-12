@@ -306,7 +306,6 @@ class TUI:
             else:
                 output_display = truncate_text(
                     output,
-                    "",
                     self._max_block_tokens,
                 )
                 blocks.append(
@@ -323,7 +322,6 @@ class TUI:
             diff_text = diff
             diff_display = truncate_text(
                 diff_text,
-                self.config.model_name,
                 self._max_block_tokens,
             )
             blocks.append(
@@ -344,7 +342,6 @@ class TUI:
 
             output_display = truncate_text(
                 output,
-                self.config.model_name,
                 self._max_block_tokens,
             )
             blocks.append(
@@ -370,7 +367,6 @@ class TUI:
 
             output_display = truncate_text(
                 output,
-                self.config.model_name,
                 self._max_block_tokens,
             )
             blocks.append(
@@ -394,7 +390,7 @@ class TUI:
                 blocks.append(Text(" • ".join(summary), style="muted"))
 
             output_display = truncate_text(
-                output, self.config.model_name, self._max_block_tokens
+                output, self._max_block_tokens
             )
             blocks.append(
                 Syntax(
@@ -411,7 +407,6 @@ class TUI:
 
             output_display = truncate_text(
                 output,
-                self.config.model_name,
                 self._max_block_tokens,
             )
             blocks.append(
@@ -436,7 +431,6 @@ class TUI:
 
             output_display = truncate_text(
                 output,
-                self.config.model_name,
                 self._max_block_tokens,
             )
             blocks.append(
@@ -464,7 +458,6 @@ class TUI:
 
             output_display = truncate_text(
                 output,
-                self.config.model_name,
                 self._max_block_tokens,
             )
             blocks.append(
@@ -478,7 +471,6 @@ class TUI:
         elif name == "todos" and success:
             output_display = truncate_text(
                 output,
-                self.config.model_name,
                 self._max_block_tokens,
             )
             blocks.append(
@@ -505,7 +497,6 @@ class TUI:
                 blocks.append(Text(" • ".join(summary), style="muted"))
             output_display = truncate_text(
                 output,
-                self.config.model_name,
                 self._max_block_tokens,
             )
             blocks.append(
@@ -521,7 +512,7 @@ class TUI:
                 blocks.append(Text(error, style="error"))
 
             output_display = truncate_text(
-                output, self.config.model_name, self._max_block_tokens
+                output, self._max_block_tokens
             )
             if output_display.strip():
                 blocks.append(

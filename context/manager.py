@@ -1,6 +1,5 @@
 from datetime import datetime
 from typing import Any
-from client.response import TokenUsage
 from config.config import Config
 from prompts.system import get_system_prompt
 from dataclasses import dataclass, field
@@ -47,8 +46,8 @@ class ContextManager:
         self.config = config
         self._model_name = self.config.model_name
         self._messages: list[MessageItem] = []
-        self._latest_usage = TokenUsage()
-        self.total_usage = TokenUsage()
+        self._latest_usage: dict = {}
+        self.total_usage: dict = {}
 
     @property
     def message_count(self) -> int:
@@ -109,15 +108,15 @@ class ContextManager:
 
     def needs_compression(self) -> bool:
         context_limit = self.config.model.context_window
-        current_tokens = self._latest_usage.total_tokens
+        current_tokens = self._latest_usage.get("total_tokens", 0)
 
         return current_tokens > (context_limit * 0.8)
 
-    def set_latest_usage(self, usage: TokenUsage):
+    def set_latest_usage(self, usage: dict):
         self._latest_usage = usage
 
-    def add_usage(self, usage: TokenUsage):
-        self.total_usage += usage
+    def add_usage(self, usage: dict):
+        self.total_usage = {k: self.total_usage.get(k, 0) + v for k, v in usage.items()}
 
     def replace_with_summary(self, summary: str) -> None:
         self._messages = []

@@ -1,13 +1,12 @@
 from typing import Any
-from client.llm_client import LLMClient
-from client.response import StreamEventType, TokenUsage
+from client.llm_client import chat
 from context.manager import ContextManager
 from prompts.system import get_compression_prompt
 
 
 class ChatCompactor:
-    def __init__(self, client: LLMClient):
-        self.client = client
+    def __init__(self, config):
+        self.config = config
 
     def _format_history_for_compaction(self, messages: list[dict[str, Any]]) -> str:
         output = ["Here is the conversation that needs to be continue: \n"]
@@ -56,7 +55,7 @@ class ChatCompactor:
 
     async def compress(
         self, context_manager: ContextManager
-    ) -> tuple[str | None, TokenUsage | None]:
+    ) -> tuple[str | None, dict | None]:
         messages = context_manager.get_messages()
 
         if len(messages) < 3:
@@ -76,13 +75,11 @@ class ChatCompactor:
         try:
             summary = ""
             usage = None
-            async for event in self.client.chat_completion(
-                compression_messages,
-                stream=False,
-            ):
-                if event.type == StreamEventType.MESSAGE_COMPLETE:
-                    usage = event.usage
-                    summary += event.text_delta.content
+            async for kind, payload in chat(self.config, compression_messages, stream=False):
+                if kind == "text":
+                    summary += payload
+                elif kind == "usage":
+                    usage = payload
 
             if not summary or not usage:
                 return None, None

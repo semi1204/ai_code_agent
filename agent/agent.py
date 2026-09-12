@@ -3,7 +3,8 @@ import asyncio
 from typing import AsyncGenerator, Awaitable, Callable
 from agent.events import AgentEvent, AgentEventType
 from agent.session import Session
-from client.response import StreamEventType, TokenUsage, ToolCall, ToolResultMessage
+import json
+from client.llm_client import chat
 from config.config import Config
 from prompts.system import create_loop_breaker_prompt
 from tools.base import ToolConfirmation, ToolResult
@@ -57,38 +58,34 @@ class Agent:
 
             tool_schemas = self.session.tool_registry.get_schemas()
 
-            tool_calls: list[ToolCall] = []
-            usage: TokenUsage | None = None
+            tool_calls: list[dict] = []
+            usage: dict | None = None
 
-            async for event in self.session.client.chat_completion(
+            async for kind, payload in chat(
+                self.config,
                 self.session.context_manager.get_messages(),
-                tools=tool_schemas if tool_schemas else None,
+                tools=tool_schemas or None,
             ):
-                if event.type == StreamEventType.TEXT_DELTA:
-                    if event.text_delta:
-                        content = event.text_delta.content
-                        response_text += content
-                        yield AgentEvent.text_delta(content)
-                elif event.type == StreamEventType.TOOL_CALL_COMPLETE:
-                    if event.tool_call:
-                        tool_calls.append(event.tool_call)
-                elif event.type == StreamEventType.ERROR:
-                    yield AgentEvent.agent_error(
-                        event.error or "Unknown error occurred.",
-                    )
-                elif event.type == StreamEventType.MESSAGE_COMPLETE:
-                    usage = event.usage
+                if kind == "text":
+                    response_text += payload
+                    yield AgentEvent.text_delta(payload)
+                elif kind == "tool_call":
+                    tool_calls.append(payload)
+                elif kind == "error":
+                    yield AgentEvent.agent_error(payload)
+                elif kind == "usage":
+                    usage = payload
 
             self.session.context_manager.add_assistant_message(
                 response_text or None,
                 (
                     [
                         {
-                            "id": tc.call_id,
+                            "id": tc["id"],
                             "type": "function",
                             "function": {
-                                "name": tc.name,
-                                "arguments": str(tc.arguments),
+                                "name": tc["name"],
+                                "arguments": json.dumps(tc["arguments"]),
                             },
                         }
                         for tc in tool_calls
@@ -112,11 +109,11 @@ class Agent:
                 self.session.context_manager.prune_tool_outputs()
                 return
 
-            tool_call_results: list[ToolResultMessage] = []
+            tool_call_results: list[tuple[str, str]] = []
 
             if self.config.parallel_tools and len(tool_calls) > 1:
                 prepared_calls = [
-                    (tc.name, tc.call_id, tc.arguments) for tc in tool_calls
+                    (tc["name"], tc["id"], tc["arguments"]) for tc in tool_calls
                 ]
                 batches = self._dependency_analyzer.group_parallel_calls(
                     prepared_calls, self.config.cwd
@@ -159,29 +156,25 @@ class Agent:
                     for name, call_id, result in results:
                         yield AgentEvent.tool_call_complete(call_id, name, result)
                         tool_call_results.append(
-                            ToolResultMessage(
-                                tool_call_id=call_id,
-                                content=result.to_model_output(),
-                                is_error=not result.success,
-                            )
+                            (call_id, result.to_model_output())
                         )
             else:
                 for tool_call in tool_calls:
                     yield AgentEvent.tool_call_start(
-                        tool_call.call_id,
-                        tool_call.name,
-                        tool_call.arguments,
+                        tool_call["id"],
+                        tool_call["name"],
+                        tool_call["arguments"],
                     )
 
                     self.session.loop_detector.record_action(
                         "tool_call",
-                        tool_name=tool_call.name,
-                        args=tool_call.arguments,
+                        tool_name=tool_call["name"],
+                        args=tool_call["arguments"],
                     )
 
                     result = await self.session.tool_registry.invoke(
-                        tool_call.name,
-                        tool_call.arguments,
+                        tool_call["name"],
+                        tool_call["arguments"],
                         self.config.cwd,
                         self.session.hook_system,
                         self.session.approval_manager,
@@ -189,27 +182,20 @@ class Agent:
                     )
 
                     yield AgentEvent.tool_call_complete(
-                        tool_call.call_id,
-                        tool_call.name,
+                        tool_call["id"],
+                        tool_call["name"],
                         result,
                     )
 
                     tool_call_results.append(
-                        ToolResultMessage(
-                            tool_call_id=tool_call.call_id,
-                            content=result.to_model_output(),
-                            is_error=not result.success,
-                        )
+                        (tool_call["id"], result.to_model_output())
                     )
 
-            for tool_result in tool_call_results:
-                self.session.context_manager.add_tool_result(
-                    tool_result.tool_call_id,
-                    tool_result.content,
-                )
+            for call_id, content in tool_call_results:
+                self.session.context_manager.add_tool_result(call_id, content)
 
             if self.session.undo_manager.has_pending_changes():
-                tool_names = ", ".join(tc.name for tc in tool_calls)
+                tool_names = ", ".join(tc["name"] for tc in tool_calls)
                 self.session.undo_manager.commit_entry(
                     f"Turn {self.session.turn_count}: {tool_names}"
                 )
@@ -236,7 +222,6 @@ class Agent:
         exc_val,
         exc_tb,
     ) -> None:
-        if self.session and self.session.client and self.session.mcp_manager:
-            await self.session.client.close()
+        if self.session:
             await self.session.mcp_manager.shutdown()
             self.session = None

@@ -232,8 +232,6 @@ class CLI:
                             session.context_manager.add_tool_result(
                                 msg.get("tool_call_id", ""), msg.get("content", "")
                             )
-
-                    await self.agent.session.client.close()
                     await self.agent.session.mcp_manager.shutdown()
 
                     self.agent.session = session
@@ -286,8 +284,6 @@ class CLI:
                             session.context_manager.add_tool_result(
                                 msg.get("tool_call_id", ""), msg.get("content", "")
                             )
-
-                    await self.agent.session.client.close()
                     await self.agent.session.mcp_manager.shutdown()
 
                     self.agent.session = session

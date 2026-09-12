@@ -124,7 +124,7 @@ class TUI:
             if isinstance(value, bool):
                 value = str(value)
 
-            table.add_row(key, value)
+            table.add_row(key, value if isinstance(value, str) else str(value))
 
         return table
 

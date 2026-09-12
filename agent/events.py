@@ -3,7 +3,6 @@ from enum import Enum
 from dataclasses import dataclass, field
 from typing import Any
 
-from client.response import TokenUsage
 from tools.base import ToolResult
 
 
@@ -38,13 +37,13 @@ class AgentEvent:
     def agent_end(
         cls,
         response: str | None = None,
-        usage: TokenUsage | None = None,
+        usage: dict | None = None,
     ) -> AgentEvent:
         return cls(
             type=AgentEventType.AGENT_END,
             data={
                 "response": response,
-                "usage": usage.__dict__ if usage else None,
+                "usage": usage,
             },
         )
 

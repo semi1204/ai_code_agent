@@ -7,6 +7,7 @@ schema object. Failures come back as "error: ..." strings, never exceptions.
 
 """
 
+import asyncio
 import inspect
 from typing import Callable
 
@@ -43,8 +44,7 @@ async def run_tool(name: str, args: dict, s) -> str:
         missing = [p for p, t in params.items() if not t.endswith("?") and p not in args]
         if missing:
             return f"error: missing parameters: {', '.join(missing)}"
-    try:
-        result = fn(args, s)
-        return await result if inspect.isawaitable(result) else result
+    try:  # sync tools run in a worker thread so read-only batches really overlap
+        return await (fn(args, s) if inspect.iscoroutinefunction(fn) else asyncio.to_thread(fn, args, s))
     except Exception as e:
         return f"error: {e}"

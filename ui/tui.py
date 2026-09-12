@@ -123,7 +123,8 @@ def read_line(fetch=None) -> str:
         try:
             suggestion = fetch()
         except Exception as e:
-            print(f"warning: prompt suggestion failed: {e}", file=sys.stderr)
+            if not state["done"]:  # a failure after the user moved on (or quit) is not worth a line
+                print(f"warning: prompt suggestion failed: {e}", file=sys.stderr)
             return
         if state["done"] or not suggestion or not suggestion.startswith(typed()):
             return

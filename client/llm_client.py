@@ -35,7 +35,7 @@ async def chat(config, messages: list[dict], tools: list[dict] | None = None, st
 
     for attempt in range(RETRIES + 1):
         try:
-            resp = urllib.request.urlopen(req, timeout=600)
+            resp = await asyncio.to_thread(urllib.request.urlopen, req, timeout=600)
             break
         except urllib.error.HTTPError as e:
             if e.code in (429, 500, 502, 503) and attempt < RETRIES:
@@ -51,7 +51,7 @@ async def chat(config, messages: list[dict], tools: list[dict] | None = None, st
             return
 
     if not stream:
-        data = json.loads(resp.read())
+        data = json.loads(await asyncio.to_thread(resp.read))
         msg = data["choices"][0]["message"]
         if msg.get("content"):
             yield ("text", msg["content"])
@@ -62,7 +62,7 @@ async def chat(config, messages: list[dict], tools: list[dict] | None = None, st
         return
 
     calls: dict[int, dict] = {}  # index -> partial tool call, arguments accumulate across chunks
-    for raw in resp:
+    while raw := await asyncio.to_thread(resp.readline):  # blocking reads happen off the event loop
         line = raw.decode("utf-8", "replace").strip()
         if not line.startswith("data:"):
             continue

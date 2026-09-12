@@ -1,5 +1,6 @@
 """Decides whether a tool call may run under the session's approval policy."""
 
+import asyncio
 import re
 
 from tools.base import MUTATING
@@ -93,11 +94,11 @@ def decide(s, name: str, args: dict, kind: str) -> str:
     return "reject" if policy == "never" else "ask"
 
 
-def check(s, name: str, args: dict, kind: str) -> str | None:
+async def check(s, name: str, args: dict, kind: str) -> str | None:
     """Returns an 'error: ...' string when the call must not run, else None."""
     decision = decide(s, name, args, kind)
     if decision == "reject":
         return "error: rejected by safety policy"
-    if decision == "ask" and not tui.confirm(name, args):
+    if decision == "ask" and not await asyncio.to_thread(tui.confirm, name, args):
         return "error: rejected by user"
     return None

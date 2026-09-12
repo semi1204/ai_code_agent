@@ -102,16 +102,17 @@ class MCPClient:
         if self._session_id:
             headers["Mcp-Session-Id"] = self._session_id
         req = Request(self.config.url, data=json.dumps(msg).encode(), headers=headers, method="POST")
-        with urlopen(req, timeout=self.config.startup_timeout_sec) as resp:
+        resp = await asyncio.to_thread(urlopen, req, timeout=self.config.startup_timeout_sec)
+        with resp:
             self._session_id = resp.headers.get("Mcp-Session-Id", self._session_id)
-            body = resp.read().decode("utf-8", "replace")
-            if wait_for is None:
-                return None
-            if resp.headers.get_content_type() == "text/event-stream":
-                for line in body.splitlines():
-                    if line.startswith("data:"):
-                        reply = json.loads(line[5:])
-                        if reply.get("id") == wait_for:
-                            return reply
-                raise RuntimeError(f"MCP server '{self.name}': no response in event stream")
-            return json.loads(body)
+            body = (await asyncio.to_thread(resp.read)).decode("utf-8", "replace")
+        if wait_for is None:
+            return None
+        if resp.headers.get_content_type() == "text/event-stream":
+            for line in body.splitlines():
+                if line.startswith("data:"):
+                    reply = json.loads(line[5:])
+                    if reply.get("id") == wait_for:
+                        return reply
+            raise RuntimeError(f"MCP server '{self.name}': no response in event stream")
+        return json.loads(body)

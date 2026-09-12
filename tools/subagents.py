@@ -48,19 +48,19 @@ def _register(name: str, spec: dict) -> None:
 
             Focus only on this task, then give a concise final answer.""")
         tools_used, final, error = [], None, None
-        deadline = asyncio.get_running_loop().time() + spec["timeout"]  # checked between events
-        async for event in agent.run(sub, prompt):
-            if asyncio.get_running_loop().time() > deadline:
-                error = f"timed out after {spec['timeout']}s"
-                break
-            if event[0] == "tool_start":
-                tools_used.append(event[1])
-                final = None
-            elif event[0] == "text":
-                final = (final or "") + event[1]
-            elif event[0] == "error":
-                error = event[1]
-                break
+        try:
+            async with asyncio.timeout(spec["timeout"]):
+                async for event in agent.run(sub, prompt):
+                    if event[0] == "tool_start":
+                        tools_used.append(event[1])
+                        final = None
+                    elif event[0] == "text":
+                        final = (final or "") + event[1]
+                    elif event[0] == "error":
+                        error = event[1]
+                        break
+        except TimeoutError:
+            error = f"timed out after {spec['timeout']}s"
         summary = f"Sub-agent '{name}' used: {', '.join(tools_used) or 'no tools'}\n\n{final or 'No response'}"
         return f"error: {error}\n{summary}" if error else summary
 

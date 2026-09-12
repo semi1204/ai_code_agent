@@ -32,6 +32,6 @@ async def invoke(s, name: str, args: dict) -> str:
         output = f"error: unknown tool: {name}"
     else:
         await run_hooks(s, "before_tool", tool_name=name, tool_params=args)
-        output = approval.check(s, name, args, TOOLS[name][3]) or await run_tool(name, args, s)
+        output = await approval.check(s, name, args, TOOLS[name][3]) or await run_tool(name, args, s)
     await run_hooks(s, "after_tool", tool_name=name, tool_params=args, tool_result=output)
     return output

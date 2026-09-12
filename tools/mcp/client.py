@@ -14,8 +14,9 @@ PROTOCOL_VERSION = "2025-03-26"
 
 
 class MCPClient:
-    def __init__(self, name: str, config: MCPServerConfig, cwd: Path) -> None:
+    def __init__(self, name: str, config: MCPServerConfig, cwd: Path, env: dict | None = None) -> None:
         self.name = name
+        self.env = dict(os.environ) if env is None else env  # base environment for a stdio server
         self.config = config
         self.cwd = cwd
         self.status = "disconnected"  # disconnected | connected | error
@@ -33,7 +34,7 @@ class MCPClient:
                     stdin=PIPE,
                     stdout=PIPE,
                     stderr=DEVNULL,
-                    env={**os.environ, **self.config.env},
+                    env={**self.env, **self.config.env},
                     cwd=self.config.cwd or self.cwd,
                 )
             await self._request(

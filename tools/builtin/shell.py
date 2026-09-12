@@ -7,15 +7,11 @@ import signal
 import sys
 from asyncio.subprocess import DEVNULL, PIPE, STDOUT
 
+from safety.approval import BLOCKED_PATTERNS, matches
 from tools.base import tool
 from ui.tui import DIM, RESET
 from utils.paths import resolve_path
 
-# Substrings refused even under the yolo policy.
-BLOCKED_COMMANDS = (
-    "rm -rf /", "rm -rf ~", "rm -rf /*", "dd if=/dev/zero", "dd if=/dev/random", "mkfs", "fdisk", "parted",
-    ":(){ :|:& };:", "chmod 777 /", "chmod -R 777", "shutdown", "reboot", "halt", "poweroff", "init 0", "init 6",
-)
 MAX_OUTPUT = 100 * 1024
 
 
@@ -27,7 +23,7 @@ MAX_OUTPUT = 100 * 1024
 )
 async def shell(args, s):
     command = args["command"]
-    if any(blocked in command.lower() for blocked in BLOCKED_COMMANDS):
+    if matches(BLOCKED_PATTERNS, command):  # refused even under yolo
         return f"error: command blocked for safety: {command}"
     cwd = resolve_path(s.config.cwd, args.get("cwd") or ".")
     if not cwd.is_dir():

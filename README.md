@@ -115,6 +115,22 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
 
 An `AGENTS.md` in the working directory is added to the system prompt as project instructions.
 
+### Approval
+
+`approval` decides what runs without asking (`yolo` approves everything; the shell tool still refuses `rm -rf /`-class commands):
+
+| Tool kind | on-request / auto-edit | auto / on-failure | never |
+|-----------|------------------------|-------------------|-------|
+| read, memory | approve | approve | approve |
+| write inside cwd | approve (overwriting an existing file asks) | approve | approve |
+| write outside cwd | ask | ask | ask |
+| shell: single safe command (`ls`, `git status`, `grep` …, no `; && \| > $( \``) | approve | approve | approve |
+| shell: anything else | ask | approve | reject |
+| shell: dangerous (`rm -rf /`, `shutdown`, `curl … \| sh` …) | reject | reject | reject |
+| network, MCP | ask | approve | reject |
+
+Tests: `python -m unittest discover -s tests`.
+
 ## Commands
 
 | Command | Description |

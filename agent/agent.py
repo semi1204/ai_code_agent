@@ -4,6 +4,7 @@ from typing import AsyncGenerator
 from agent.events import AgentEvent, AgentEventType
 from agent import undo
 from agent.session import Session
+from hooks.hook_system import run_hooks
 from tools.mcp import mcp_manager
 import json
 from client.llm_client import chat
@@ -20,7 +21,7 @@ class Agent:
         self._dependency_analyzer = DependencyAnalyzer()
 
     async def run(self, message: str):
-        await self.session.hook_system.trigger_before_agent(message)
+        await run_hooks(self.session, "before_agent", user_message=message)
         yield AgentEvent.agent_start(message)
         self.session.context_manager.add_user_message(message)
 
@@ -32,7 +33,7 @@ class Agent:
             if event.type == AgentEventType.TEXT_COMPLETE:
                 final_response = event.data.get("content")
 
-        await self.session.hook_system.trigger_after_agent(message, final_response)
+        await run_hooks(self.session, "after_agent", user_message=message, response=final_response)
         yield AgentEvent.agent_end(final_response)
 
     async def _agentic_loop(self) -> AsyncGenerator[AgentEvent, None]:
@@ -69,6 +70,7 @@ class Agent:
                 elif kind == "tool_call":
                     tool_calls.append(payload)
                 elif kind == "error":
+                    await run_hooks(self.session, "on_error", error=payload)
                     yield AgentEvent.agent_error(payload)
                 elif kind == "usage":
                     usage = payload
@@ -189,6 +191,7 @@ class Agent:
                 self.session.context_manager.add_usage(usage)
 
             self.session.context_manager.prune_tool_outputs()
+        await run_hooks(self.session, "on_error", error=f"Maximum turns ({max_turns}) reached")
         yield AgentEvent.agent_error(f"Maximum turns ({max_turns}) reached")
 
     async def __aenter__(self) -> Agent:

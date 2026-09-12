@@ -1,139 +1,54 @@
+"""Hooks: shell commands from config.toml that run on agent/tool events.
+
+Context reaches the hook through AI_AGENT_* environment variables
+(TRIGGER, CWD, and one per keyword passed to run_hooks, dicts as JSON).
+"""
+
 import asyncio
 import json
 import os
 import signal
 import sys
 import tempfile
-from typing import Any
-from config.config import Config, HookConfig
+from asyncio.subprocess import DEVNULL, PIPE
+
+from tools.builtin.shell import scrubbed_env
 
 
-class HookSystem:
-    def __init__(self, config: Config):
-        self.config = config
-        self.hooks: list[HookConfig] = []
-        if self.config.hooks_enabled:
-            self.hooks = [hook for hook in self.config.hooks if hook.enabled]
+async def run_hooks(s, trigger: str, **context) -> None:
+    if not s.config.hooks_enabled:
+        return
+    env = {**scrubbed_env(s.config), "AI_AGENT_TRIGGER": trigger, "AI_AGENT_CWD": str(s.config.cwd)}
+    for key, value in context.items():
+        if value is not None:
+            env[f"AI_AGENT_{key.upper()}"] = value if isinstance(value, str) else json.dumps(value)
+    for hook in s.config.hooks:
+        if hook.enabled and hook.trigger == trigger:
+            await _run(hook, env, s.config.cwd)
 
-    async def _run_hook(self, hook: HookConfig, env: dict[str, str]) -> None:
+
+async def _run(hook, env: dict, cwd) -> None:
+    script = None
+    command = hook.command
+    if not command:  # inline script: write it to a temp file
+        with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as f:
+            f.write("#!/bin/bash\n" + hook.script)
+            script = command = f.name
+        os.chmod(script, 0o755)
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            command, stdin=DEVNULL, stdout=DEVNULL, stderr=PIPE, cwd=cwd, env=env, start_new_session=True
+        )
         try:
-            if hook.command:
-                await self._run_command(hook.command, hook.timeout_sec, env)
-            else:
-                with tempfile.NamedTemporaryFile(
-                    mode="w", suffix=".sh", delete=False
-                ) as f:
-                    f.write("#!/bin/bash\n")
-                    f.write(hook.script)
-                    script_path = f.name
-                try:
-                    os.chmod(script_path, 0o755)
-                    await self._run_command(script_path, hook.timeout_sec, env)
-                finally:
-                    os.unlink(script_path)
-        except Exception as e:
-            print(e)
-
-    async def _run_command(
-        self,
-        command: str,
-        timeout: float,
-        env: dict[str, str],
-    ) -> None:
-        process = await asyncio.create_subprocess_shell(
-            command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=self.config.cwd,
-            env=env,
-            start_new_session=True,
-        )
-
-        try:
-            await asyncio.wait_for(process.communicate(), timeout=timeout)
-        except asyncio.TimeoutError:
-            if sys.platform != "win32":
-                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-            else:
-                process.kill()
-            await process.wait()
-
-    def _build_env(
-        self,
-        trigger: str,
-        tool_name: str | None = None,
-        user_message: str | None = None,
-        error: Exception | None = None,
-    ) -> dict[str, str]:
-        env = os.environ.copy()
-        env["AI_AGENT_TRIGGER"] = trigger
-        env["AI_AGENT_CWD"] = str(self.config.cwd)
-
-        if tool_name:
-            env["AI_AGENT_TOOL_NAME"] = tool_name
-
-        if user_message:
-            env["AI_AGENT_USER_MESSAGE"] = user_message
-
-        if error:
-            env["AI_AGENT_ERROR"] = str(error)
-
-        return env
-
-    async def trigger_before_agent(self, user_message: str) -> None:
-        env = self._build_env(
-            "before_agent",
-            user_message=user_message,
-        )
-
-        for hook in self.hooks:
-            if hook.trigger == "before_agent":
-                await self._run_hook(hook, env)
-
-    async def trigger_after_agent(
-        self,
-        user_message: str,
-        agent_response: str,
-    ) -> None:
-        env = self._build_env(
-            "after_agent",
-            user_message=user_message,
-        )
-        env["AI_AGENT_RESPONSE"] = agent_response
-
-        for hook in self.hooks:
-            if hook.trigger == "after_agent":
-                await self._run_hook(hook, env)
-
-    async def trigger_before_tool(
-        self,
-        tool_name: str,
-        tool_params: dict[str, Any],
-    ) -> None:
-        env = self._build_env("before_tool", tool_name=tool_name)
-        env["AI_AGENT_TOOL_PARAMS"] = json.dumps(tool_params)
-
-        for hook in self.hooks:
-            if hook.trigger == "before_tool":
-                await self._run_hook(hook, env)
-
-    async def trigger_after_tool(
-        self,
-        tool_name: str,
-        tool_params: dict[str, Any],
-        tool_result: str,
-    ) -> None:
-        env = self._build_env("after_tool", tool_name=tool_name)
-        env["AI_AGENT_TOOL_PARAMS"] = json.dumps(tool_params)
-        env["AI_AGENT_TOOL_RESULT"] = tool_result
-
-        for hook in self.hooks:
-            if hook.trigger == "after_tool":
-                await self._run_hook(hook, env)
-
-    async def trigger_on_error(self, error: Exception) -> None:
-        env = self._build_env("on_error", error=error)
-
-        for hook in self.hooks:
-            if hook.trigger == "on_error":
-                await self._run_hook(hook, env)
+            _, stderr = await asyncio.wait_for(proc.communicate(), hook.timeout_sec)
+            if proc.returncode:
+                print(f"warning: hook '{hook.name}' exited {proc.returncode}: {stderr.decode(errors='replace').strip()[:200]}", file=sys.stderr)
+        except TimeoutError:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL) if sys.platform != "win32" else proc.kill()
+            await proc.wait()
+            print(f"warning: hook '{hook.name}' timed out after {hook.timeout_sec}s", file=sys.stderr)
+    except OSError as e:
+        print(f"warning: hook '{hook.name}': {e}", file=sys.stderr)
+    finally:
+        if script:
+            os.unlink(script)

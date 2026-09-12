@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import tools.builtin  # noqa: F401  (registers the builtin function tools)
 import tools.subagents  # noqa: F401  (registers subagent_* tools)
+from hooks.hook_system import run_hooks
 from safety import approval
 from tools.base import TOOLS, make_schema, run_tool
 
@@ -30,7 +31,7 @@ async def invoke(s, name: str, args: dict) -> str:
     if name not in names(s):
         output = f"error: unknown tool: {name}"
     else:
-        await s.hook_system.trigger_before_tool(name, args)
+        await run_hooks(s, "before_tool", tool_name=name, tool_params=args)
         output = approval.check(s, name, args, TOOLS[name][3]) or await run_tool(name, args, s)
-    await s.hook_system.trigger_after_tool(name, args, output)
+    await run_hooks(s, "after_tool", tool_name=name, tool_params=args, tool_result=output)
     return output

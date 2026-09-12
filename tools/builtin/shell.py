@@ -35,7 +35,7 @@ async def shell(args, s):
     timeout = min(max(int(args.get("timeout") or 120), 1), 600)
     argv = ["cmd.exe", "/c", command] if sys.platform == "win32" else ["/bin/bash", "-c", command]
     proc = await asyncio.create_subprocess_exec(
-        *argv, stdin=DEVNULL, stdout=PIPE, stderr=STDOUT, cwd=cwd, env=_environment(s.config), start_new_session=True
+        *argv, stdin=DEVNULL, stdout=PIPE, stderr=STDOUT, cwd=cwd, env=scrubbed_env(s.config), start_new_session=True
     )
     chunks, size = [], 0
     try:
@@ -57,7 +57,7 @@ async def shell(args, s):
     return output or "(empty)"
 
 
-def _environment(config) -> dict:
+def scrubbed_env(config) -> dict:
     """os.environ minus secrets (config.shell_environment.exclude_patterns), plus set_vars."""
     policy = config.shell_environment
     env = dict(os.environ)

@@ -5,7 +5,6 @@ from config.config import Config
 from context.compaction import ChatCompactor
 from context.loop_detector import LoopDetector
 from context.manager import ContextManager
-from hooks.hook_system import HookSystem
 from tools import discovery
 from tools.builtin import memory
 from tools.mcp import mcp_manager
@@ -19,7 +18,6 @@ class Session:
         self.mcp: dict = {}  # server name -> MCPClient
         self.chat_compactor = ChatCompactor(config)
         self.loop_detector = LoopDetector()
-        self.hook_system = HookSystem(config)
         self.session_id = str(uuid.uuid4())
         self.created_at = datetime.now()
         self.updated_at = datetime.now()

@@ -5,7 +5,7 @@ import uuid
 from agent.undo import UndoManager
 from client.llm_client import LLMClient
 from config.config import Config
-from config.loader import get_data_dir
+from config.loader import DATA_DIR
 from context.compaction import ChatCompactor
 from context.loop_detector import LoopDetector
 from context.manager import ContextManager
@@ -53,7 +53,7 @@ class Session:
         )
 
     def _load_memory(self) -> str | None:
-        data_dir = get_data_dir()
+        data_dir = DATA_DIR
         data_dir.mkdir(parents=True, exist_ok=True)
         path = data_dir / "user_memory.json"
 

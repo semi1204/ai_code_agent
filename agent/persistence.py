@@ -5,7 +5,7 @@ import json
 import os
 from typing import Any
 from client.response import TokenUsage
-from config.loader import get_data_dir
+from config.loader import DATA_DIR
 
 
 @dataclass
@@ -41,7 +41,7 @@ class SessionSnapshot:
 
 class PersistenceManager:
     def __init__(self):
-        self.data_dir = get_data_dir()
+        self.data_dir = DATA_DIR
         self.sessions_dir = self.data_dir / "sessions"
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
         self.checkpoints_dir = self.data_dir / "checkpoints"

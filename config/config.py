@@ -1,128 +1,83 @@
-from __future__ import annotations
-from enum import Enum
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
-from pydantic import BaseModel, Field, model_validator
+
+APPROVAL_POLICIES = ("on-request", "on-failure", "auto", "auto-edit", "never", "yolo")
+HOOK_TRIGGERS = ("before_agent", "after_agent", "before_tool", "after_tool", "on_error")
 
 
-class ModelConfig(BaseModel):
+@dataclass
+class ModelConfig:
     name: str = "mistralai/devstral-2512:free"
-    temperature: float = Field(default=1, ge=0.0, le=2.0)
+    temperature: float = 1
     context_window: int = 256_000
 
 
-class ShellEnvironmentPolicy(BaseModel):
+@dataclass
+class ShellEnvironmentPolicy:
     ignore_default_excludes: bool = False
-    exclude_patterns: list[str] = Field(
-        default_factory=lambda: ["*KEY*", "*TOKEN*", "*SECRET*"]
-    )
-    set_vars: dict[str, str] = Field(default_factory=dict)
+    exclude_patterns: list = field(default_factory=lambda: ["*KEY*", "*TOKEN*", "*SECRET*"])
+    set_vars: dict = field(default_factory=dict)
 
 
-class MCPServerConfig(BaseModel):
+@dataclass
+class MCPServerConfig:
     enabled: bool = True
     startup_timeout_sec: float = 10
+    command: str | None = None  # stdio transport
+    args: list = field(default_factory=list)
+    env: dict = field(default_factory=dict)
+    cwd: str | None = None
+    url: str | None = None  # streamable http transport
 
-    # stdio transport
-    command: str | None = None
-    args: list[str] = Field(default_factory=list)
-    env: dict[str, str] = Field(default_factory=dict)
-    cwd: Path | None = None
-
-    # http/sse transport
-    url: str | None = None
-
-    @model_validator(mode="after")
-    def validate_transport(self) -> MCPServerConfig:
-        has_command = self.command is not None
-        has_url = self.url is not None
-
-        if not has_command and not has_url:
-            raise ValueError(
-                "MCP Server must have either 'command' (stdio) or 'url' (http/sse)"
-            )
-
-        if has_command and has_url:
-            raise ValueError(
-                "MCP Server cannot have both 'command' (stdio) and 'url' (http/sse)"
-            )
-
-        return self
+    def __post_init__(self):
+        if bool(self.command) == bool(self.url):
+            raise ValueError("MCP server needs exactly one of 'command' (stdio) or 'url' (http)")
 
 
-class ApprovalPolicy(str, Enum):
-    ON_REQUEST = "on-request"
-    ON_FAILURE = "on-failure"
-    AUTO = "auto"
-    AUTO_EDIT = "auto-edut"
-    NEVER = "never"
-    YOLO = "yolo"
-
-
-class HookTrigger(str, Enum):
-    BEFORE_AGENT = "before_agent"
-    AFTER_AGENT = "after_agent"
-    BEFORE_TOOL = "before_tool"
-    AFTER_TOOL = "after_tool"
-    ON_ERROR = "on_error"
-
-
-class HookConfig(BaseModel):
+@dataclass
+class HookConfig:
     name: str
-    trigger: HookTrigger
-    command: str | None = None  # python3 tests.py
-    script: str | None = None  # *.sh
+    trigger: str
+    command: str | None = None
+    script: str | None = None
     timeout_sec: float = 30
     enabled: bool = True
 
-    @model_validator(mode="after")
-    def validate_hook(self) -> HookConfig:
-        if not self.command and not self.script:
-            raise ValueError("Hook must either have 'command' or 'script'")
-        return self
+    def __post_init__(self):
+        if self.trigger not in HOOK_TRIGGERS:
+            raise ValueError(f"hook '{self.name}': trigger must be one of {HOOK_TRIGGERS}")
+        if not (self.command or self.script):
+            raise ValueError(f"hook '{self.name}': needs 'command' or 'script'")
 
 
-class Config(BaseModel):
-    model: ModelConfig = Field(default_factory=ModelConfig)
-    cwd: Path = Field(default_factory=Path.cwd)
-    shell_environment: ShellEnvironmentPolicy = Field(
-        default_factory=ShellEnvironmentPolicy
-    )
+@dataclass
+class Config:
+    model: ModelConfig = field(default_factory=ModelConfig)
+    cwd: Path = field(default_factory=Path.cwd)
+    shell_environment: ShellEnvironmentPolicy = field(default_factory=ShellEnvironmentPolicy)
     hooks_enabled: bool = False
-    hooks: list[HookConfig] = Field(default_factory=list)
-    approval: ApprovalPolicy = ApprovalPolicy.ON_REQUEST
+    hooks: list = field(default_factory=list)
+    approval: str = "on-request"
     max_turns: int = 100
-    mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
-
-    allowed_tools: list[str] | None = Field(
-        None,
-        description="If set, only these tools will be available to the agent",
-    )
-
+    mcp_servers: dict = field(default_factory=dict)
+    allowed_tools: list | None = None  # if set, only these tools are offered
     developer_instructions: str | None = None
     user_instructions: str | None = None
+    parallel_tools: bool = True
+    max_parallel_tools: int = 5
 
-    parallel_tools: bool = Field(
-        True,
-        description="Enable parallel tool execution",
-    )
-    max_parallel_tools: int = Field(
-        5,
-        ge=1,
-        le=20,
-        description="Maximum number of tools to execute in parallel",
-    )
-
-    debug: bool = False
+    def __post_init__(self):
+        if self.approval not in APPROVAL_POLICIES:
+            raise ValueError(f"approval must be one of {APPROVAL_POLICIES}")
 
     @property
     def api_key(self) -> str | None:
-        return os.environ.get("API_KEY")
+        return os.environ.get("API_KEY") or os.environ.get("OPENAI_API_KEY")
 
     @property
     def base_url(self) -> str | None:
-        return os.environ.get("BASE_URL")
+        return os.environ.get("BASE_URL") or os.environ.get("OPENAI_API_BASE")
 
     @property
     def model_name(self) -> str:
@@ -136,20 +91,20 @@ class Config(BaseModel):
     def temperature(self) -> float:
         return self.model.temperature
 
-    @model_name.setter
-    def temperature(self, value: str) -> None:
-        self.model.temperature = value
-
     def validate(self) -> list[str]:
-        errors: list[str] = []
-
+        errors = []
         if not self.api_key:
-            errors.append("No API key found. Set API_KEY environment variable")
-
+            errors.append("No API key found. Set API_KEY (or OPENAI_API_KEY)")
         if not self.cwd.exists():
             errors.append(f"Working directory does not exist: {self.cwd}")
-
         return errors
 
-    def to_dict(self) -> dict[str, Any]:
-        return self.model_dump(mode="json")
+
+def from_dict(d: dict) -> Config:
+    d = dict(d)
+    d["model"] = ModelConfig(**d.get("model", {}))
+    d["shell_environment"] = ShellEnvironmentPolicy(**d.get("shell_environment", {}))
+    d["hooks"] = [HookConfig(**h) for h in d.get("hooks", [])]
+    d["mcp_servers"] = {k: MCPServerConfig(**v) for k, v in d.get("mcp_servers", {}).items()}
+    d["cwd"] = Path(d.get("cwd", Path.cwd()))
+    return Config(**d)

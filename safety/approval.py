@@ -3,7 +3,6 @@ from enum import Enum
 from pathlib import Path
 import re
 from typing import Any, Awaitable, Callable
-from config.config import ApprovalPolicy
 from tools.base import ToolConfirmation
 
 
@@ -92,7 +91,7 @@ def is_safe_command(command: str) -> bool:
 class ApprovalManager:
     def __init__(
         self,
-        approval_policy: ApprovalPolicy,
+        approval_policy: str,
         cwd: Path,
         confirmation_callback: Callable[[ToolConfirmation], bool] | None = None,
     ) -> None:
@@ -101,21 +100,21 @@ class ApprovalManager:
         self.confirmation_callback = confirmation_callback
 
     def _assess_command_safety(self, command: str) -> ApprovalDecision:
-        if self.approval_policy == ApprovalPolicy.YOLO:
+        if self.approval_policy == "yolo":
             return ApprovalDecision.APPROVED
 
         if is_dangerous_command(command):
             return ApprovalDecision.REJECTED
 
-        if self.approval_policy == ApprovalPolicy.NEVER:
+        if self.approval_policy == "never":
             if is_safe_command(command):
                 return ApprovalDecision.APPROVED
             return ApprovalDecision.REJECTED
 
-        if self.approval_policy in {ApprovalPolicy.AUTO, ApprovalPolicy.ON_FAILURE}:
+        if self.approval_policy in {"auto", "on-failure"}:
             return ApprovalDecision.APPROVED
 
-        if self.approval_policy == ApprovalPolicy.AUTO_EDIT:
+        if self.approval_policy == "auto-edit":
             if is_safe_command(command):
                 return ApprovalDecision.APPROVED
 
@@ -143,7 +142,7 @@ class ApprovalManager:
                 return path_decision
 
         if context.is_dangerous:
-            if self.approval_policy == ApprovalPolicy.YOLO:
+            if self.approval_policy == "yolo":
                 return ApprovalDecision.APPROVED
             return ApprovalDecision.NEEDS_CONFIRMATION
 

@@ -1,7 +1,7 @@
 import json
 import uuid
 from config.config import Config
-from config.loader import get_data_dir
+from config.loader import DATA_DIR
 from tools.base import Tool, ToolInvocation, ToolKind, ToolResult
 from pydantic import BaseModel, Field
 
@@ -23,7 +23,7 @@ class MemoryTool(Tool):
     schema = MemoryParams
 
     def _load_memory(self) -> dict:
-        data_dir = get_data_dir()
+        data_dir = DATA_DIR
         data_dir.mkdir(parents=True, exist_ok=True)
         path = data_dir / "user_memory.json"
 
@@ -37,7 +37,7 @@ class MemoryTool(Tool):
             return {"entries": {}}
 
     def _save_memory(self, memory: dict) -> None:
-        data_dir = get_data_dir()
+        data_dir = DATA_DIR
         data_dir.mkdir(parents=True, exist_ok=True)
         path = data_dir / "user_memory.json"
 

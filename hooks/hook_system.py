@@ -5,7 +5,7 @@ import signal
 import sys
 import tempfile
 from typing import Any
-from config.config import Config, HookConfig, HookTrigger
+from config.config import Config, HookConfig
 from tools.base import ToolResult
 
 
@@ -61,7 +61,7 @@ class HookSystem:
 
     def _build_env(
         self,
-        trigger: HookTrigger,
+        trigger: str,
         tool_name: str | None = None,
         user_message: str | None = None,
         error: Exception | None = None,
@@ -83,12 +83,12 @@ class HookSystem:
 
     async def trigger_before_agent(self, user_message: str) -> None:
         env = self._build_env(
-            HookTrigger.BEFORE_AGENT,
+            "before_agent",
             user_message=user_message,
         )
 
         for hook in self.hooks:
-            if hook.trigger == HookTrigger.BEFORE_AGENT:
+            if hook.trigger == "before_agent":
                 await self._run_hook(hook, env)
 
     async def trigger_after_agent(
@@ -97,13 +97,13 @@ class HookSystem:
         agent_response: str,
     ) -> None:
         env = self._build_env(
-            HookTrigger.AFTER_AGENT,
+            "after_agent",
             user_message=user_message,
         )
         env["AI_AGENT_RESPONSE"] = agent_response
 
         for hook in self.hooks:
-            if hook.trigger == HookTrigger.AFTER_AGENT:
+            if hook.trigger == "after_agent":
                 await self._run_hook(hook, env)
 
     async def trigger_before_tool(
@@ -111,11 +111,11 @@ class HookSystem:
         tool_name: str,
         tool_params: dict[str, Any],
     ) -> None:
-        env = self._build_env(HookTrigger.BEFORE_TOOL, tool_name=tool_name)
+        env = self._build_env("before_tool", tool_name=tool_name)
         env["AI_AGENT_TOOL_PARAMS"] = json.dumps(tool_params)
 
         for hook in self.hooks:
-            if hook.trigger == HookTrigger.BEFORE_TOOL:
+            if hook.trigger == "before_tool":
                 await self._run_hook(hook, env)
 
     async def trigger_after_tool(
@@ -124,17 +124,17 @@ class HookSystem:
         tool_params: dict[str, Any],
         tool_result: ToolResult,
     ) -> None:
-        env = self._build_env(HookTrigger.AFTER_TOOL, tool_name=tool_name)
+        env = self._build_env("after_tool", tool_name=tool_name)
         env["AI_AGENT_TOOL_PARAMS"] = json.dumps(tool_params)
         env["AI_AGENT_TOOL_RESULT"] = tool_result.to_model_output()
 
         for hook in self.hooks:
-            if hook.trigger == HookTrigger.AFTER_TOOL:
+            if hook.trigger == "after_tool":
                 await self._run_hook(hook, env)
 
     async def trigger_on_error(self, error: Exception) -> None:
-        env = self._build_env(HookTrigger.ON_ERROR, error=error)
+        env = self._build_env("on_error", error=error)
 
         for hook in self.hooks:
-            if hook.trigger == HookTrigger.ON_ERROR:
+            if hook.trigger == "on_error":
                 await self._run_hook(hook, env)

@@ -1,3 +1,4 @@
+import dataclasses
 import asyncio
 from typing import Any
 from config.config import Config
@@ -48,12 +49,11 @@ class SubagentTool(Tool):
         if not params.goal:
             return ToolResult.error_result("No goal specified for sub-agent")
 
-        config_dict = self.config.to_dict()
-        config_dict["max_turns"] = self.definition.max_turns
-        if self.definition.allowed_tools:
-            config_dict["allowed_tools"] = self.definition.allowed_tools
-
-        subagent_config = Config(**config_dict)
+        subagent_config = dataclasses.replace(
+            self.config,
+            max_turns=self.definition.max_turns,
+            allowed_tools=self.definition.allowed_tools or self.config.allowed_tools,
+        )
 
         prompt = f"""You are a specialized sub-agent with a specific task to complete.
 

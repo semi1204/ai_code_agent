@@ -7,7 +7,7 @@ from agent.agent import Agent
 from agent.events import AgentEventType
 from agent.persistence import PersistenceManager, SessionSnapshot
 from agent.session import Session
-from config.config import ApprovalPolicy, Config
+from config.config import APPROVAL_POLICIES, Config
 from config.loader import load_config
 from ui.tui import TUI, get_console
 
@@ -137,7 +137,7 @@ class CLI:
             console.print("\n[bold]Current Configuration[/bold]")
             console.print(f"  Model: {self.config.model_name}")
             console.print(f"  Temperature: {self.config.temperature}")
-            console.print(f"  Approval: {self.config.approval.value}")
+            console.print(f"  Approval: {self.config.approval}")
             console.print(f"  Working Dir: {self.config.cwd}")
             console.print(f"  Max Turns: {self.config.max_turns}")
             console.print(f"  Hooks Enabled: {self.config.hooks_enabled}")
@@ -149,21 +149,14 @@ class CLI:
                 console.print(f"Current model: {self.config.model_name}")
         elif cmd_name == "/approval":
             if cmd_args:
-                try:
-                    approval = ApprovalPolicy(cmd_args)
-                    self.config.approval = approval
-                    console.print(
-                        f"[success]Approval policy changed to: {cmd_args} [/success]"
-                    )
-                except:
-                    console.print(
-                        f"[error]Incorrect approval policy: {cmd_args} [/error]"
-                    )
-                    console.print(
-                        f"Valid options: {', '.join(p for p in ApprovalPolicy)}"
-                    )
+                if cmd_args in APPROVAL_POLICIES:
+                    self.config.approval = cmd_args
+                    console.print(f"[success]Approval policy changed to: {cmd_args} [/success]")
+                else:
+                    console.print(f"[error]Incorrect approval policy: {cmd_args} [/error]")
+                    console.print(f"Valid options: {', '.join(APPROVAL_POLICIES)}")
             else:
-                console.print(f"Current approval policy: {self.config.approval.value}")
+                console.print(f"Current approval policy: {self.config.approval}")
         elif cmd_name == "/stats":
             stats = self.agent.session.get_stats()
             console.print("\n[bold]Session Statistics [/bold]")
@@ -349,11 +342,7 @@ def main(
     prompt: str | None,
     cwd: Path | None,
 ):
-    try:
-        config = load_config(cwd=cwd)
-    except Exception as e:
-        console.print(f"[error]Configuration Error: {e}[/error]")
-
+    config = load_config(cwd=cwd)
     errors = config.validate()
 
     if errors:

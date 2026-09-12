@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 from typing import Any
 from config.config import Config
-from config.loader import get_config_dir
+from config.loader import DATA_DIR
 from tools.base import Tool
 from tools.registry import ToolRegistry
 
@@ -67,4 +67,4 @@ class ToolDiscoveryManager:
 
     def discover_all(self) -> None:
         self.discover_from_directory(self.config.cwd)
-        self.discover_from_directory(get_config_dir())
+        self.discover_from_directory(DATA_DIR)

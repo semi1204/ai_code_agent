@@ -1,22 +1,20 @@
+# Example project config: loaded when the agent runs in this directory
+# (merged over ~/.ai-agent/config.toml). Every key is optional.
 hooks_enabled = true
 
 [model]
 temperature = 0
 
 [[hooks]]
-name='test_before_tool'
-trigger='before_tool'
-command='python3 ./scripts/test_tool.py'
+name = "log_tool_calls"
+trigger = "before_tool"
+command = "python3 ./scripts/test_tool.py"
 
 [[hooks]]
-name='test_before_agent'
-trigger='before_agent'
-command='python3 ./scripts/test_tool.py'
+name = "log_messages"
+trigger = "before_agent"
+command = "python3 ./scripts/test_tool.py"
 
 [mcp_servers.filesystem]
 command = "npx"
-args = ["-y", "@modelcontextprotocol/server-filesystem", "/Users/rivaanranawat/Desktop/ai-agent", "/tmp"]
-
-[mcp_servers.filesystem2]
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-filesystem222222222222", "/Users/rivaanranawat/Desktop/ai-agent", "/tmp"]
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]

@@ -1,34 +1,12 @@
 #!/usr/bin/env python3
+"""Example hook: appends one JSON line per event to ./hook.log (wired up in .ai-agent/config.toml)."""
 
-import os
-import sys
 import json
+import os
 from datetime import datetime
 
-
-def main():
-    trigger = os.environ.get("AI_AGENT_TRIGGER")
-    cwd = os.environ.get("AI_AGENT_CWD")
-    tool_name = os.environ.get("AI_AGENT_TOOL_NAME")
-    user_message = os.environ.get("AI_AGENT_USER_MESSAGE")
-    error = os.environ.get("AI_AGENT_ERROR")
-
-    log_data = {
-        "timestamp": datetime.now().isoformat(),
-        "trigger": trigger,
-        "cwd": cwd,
-        "tool_name": tool_name,
-        "user_message": user_message,
-        "error": error,
-    }
-
-    log_path = os.path.expanduser("/Users/rivaanranawat/Desktop/ai-agent/hook.log")
-    os.makedirs(os.path.dirname(log_path), exist_ok=True)
-    with open(log_path, "a") as f:
-        f.write(f"[HOOK] {json.dumps(log_data)}\n")
-
-    sys.exit(0)
-
-
-if __name__ == "__main__":
-    main()
+KEYS = ("TRIGGER", "TOOL_NAME", "TOOL_PARAMS", "TOOL_RESULT", "USER_MESSAGE", "RESPONSE", "ERROR")
+entry = {"timestamp": datetime.now().isoformat()}
+entry.update({key.lower(): os.environ[f"AI_AGENT_{key}"] for key in KEYS if f"AI_AGENT_{key}" in os.environ})
+with open(os.path.join(os.environ.get("AI_AGENT_CWD", "."), "hook.log"), "a", encoding="utf-8") as f:
+    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
